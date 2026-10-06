@@ -15,6 +15,7 @@ const {
 } = require("electron");
 const path = require("path");
 const fs = require("fs");
+const os = require("os");
 const { pathToFileURL } = require("url");
 const { createStores, isWeb } = require("./store");
 
@@ -37,6 +38,7 @@ const PAGES = {
   bookmarks: fileUrl("bookmarks.html"),
   about: fileUrl("about.html"),
   credits: fileUrl("credits.html"),
+  settings: fileUrl("settings.html"),
 };
 const PAGE_NAMES = new Map(
   Object.entries(PAGES).map(([name, url]) => [url, name]),
@@ -101,6 +103,8 @@ const DEFAULT_CONFIG = {
     html: false, // true = terapkan filter HTML (##^); sangat agresif, bisa merusak halaman
     popups: true, // blokir popup / tab iklan (window.open) yang cocok dengan daftar filter, plus pembatas spam popup
     allowlist: [], // situs yang dikecualikan dari ad blocker, mis. ["x.com", "youtube.com"]
+    neverBlock: [], // host tambahan yang TIDAK PERNAH disentuh (login, pembayaran, dsb.); digabung dengan daftar bawaan
+    scriptlets: true, // false = matikan injeksi scriptlet uBO (YouTube, IDLIX, dsb.); sembunyikan elemen & blokir jaringan tetap jalan
     debug: false, // true = cetak URL yang diblokir ke terminal
   },
   dns: {
@@ -118,6 +122,8 @@ const DEFAULT_CONFIG = {
   tabSuspend: {
     enabled: true, // tab latar belakang yang menganggur dibebaskan dari RAM
     afterMinutes: 5,
+    neverSuspend: ["web.whatsapp.com", "meet.google.com"], // host yang tidak pernah ditidurkan (cocok dengan subdomain juga)
+    lowMemory: { freePercent: 15, afterMinutes: 1 }, // RAM kosong < freePercent% -> batas idle jadi afterMinutes (0 = nonaktif)
   },
 };
 
@@ -132,7 +138,14 @@ function loadConfig() {
       adblock: { ...DEFAULT_CONFIG.adblock, ...raw.adblock },
       dns: { ...DEFAULT_CONFIG.dns, ...raw.dns },
       history: { ...DEFAULT_CONFIG.history, ...raw.history },
-      tabSuspend: { ...DEFAULT_CONFIG.tabSuspend, ...raw.tabSuspend },
+      tabSuspend: {
+        ...DEFAULT_CONFIG.tabSuspend,
+        ...raw.tabSuspend,
+        lowMemory: {
+          ...DEFAULT_CONFIG.tabSuspend.lowMemory,
+          ...raw.tabSuspend?.lowMemory,
+        },
+      },
       suggestions: { ...DEFAULT_CONFIG.suggestions, ...raw.suggestions },
       identity: { ...DEFAULT_CONFIG.identity, ...raw.identity },
     };
@@ -146,6 +159,61 @@ function loadConfig() {
 }
 
 const config = loadConfig();
+
+// Pilihan dari halaman Settings (userData/settings.json) menimpa config.json
+const SETTINGS_FILE = path.join(app.getPath("userData"), "settings.json");
+const DNS_MODES = ["secure", "automatic", "off"];
+const CACHE_LIMITS = [0, 50, 100, 250, 500]; // MB; 0 = otomatis (bawaan Chromium)
+
+function isDohUrl(u) {
+  if (typeof u !== "string" || u.length > 300) return false;
+  try {
+    const x = new URL(u);
+    return (
+      x.protocol === "https:" && !!x.hostname && !x.username && !x.password
+    );
+  } catch {
+    return false;
+  }
+}
+
+function readSettings() {
+  try {
+    const s = JSON.parse(fs.readFileSync(SETTINGS_FILE, "utf8"));
+    return s && typeof s === "object" && !Array.isArray(s) ? s : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeSettings(patch) {
+  const tmp = SETTINGS_FILE + ".tmp";
+  fs.writeFileSync(
+    tmp,
+    JSON.stringify({ ...readSettings(), ...patch }, null, 2),
+  );
+  fs.renameSync(tmp, SETTINGS_FILE);
+}
+
+{
+  const s = readSettings();
+  if (DNS_MODES.includes(s.dnsMode)) config.dns.mode = s.dnsMode;
+  if (
+    Array.isArray(s.dnsServers) &&
+    s.dnsServers.length >= 1 &&
+    s.dnsServers.length <= 5 &&
+    s.dnsServers.every(isDohUrl)
+  )
+    config.dns.servers = s.dnsServers;
+  if (CACHE_LIMITS.includes(s.cacheLimitMB))
+    config.cacheLimitMB = s.cacheLimitMB;
+}
+const cacheLimitAtStart = config.cacheLimitMB | 0; // perubahan batas baru berlaku setelah Syptek dibuka ulang
+if (cacheLimitAtStart > 0)
+  app.commandLine.appendSwitch(
+    "disk-cache-size",
+    String(cacheLimitAtStart * 1024 * 1024),
+  );
 
 // Mesin pencari aktif (bisa diganti lewat Ctrl+E / Alt+1..9, pilihan terakhir disimpan di session.json)
 const isEngine = (e) =>
@@ -179,12 +247,16 @@ try {
   const oldDir = path.join(app.getPath("appData"), "Sift");
   const newDir = app.getPath("userData");
   if (oldDir.toLowerCase() !== newDir.toLowerCase() && fs.existsSync(oldDir)) {
-    const skip = /^(Cache|Code Cache|GPUCache|DawnCache|GrShaderCache|ShaderCache|Crashpad|blob_storage)$/i;
+    const skip =
+      /^(Cache|Code Cache|GPUCache|DawnCache|GrShaderCache|ShaderCache|Crashpad|blob_storage)$/i;
     fs.cpSync(oldDir, newDir, {
       recursive: true,
       force: false, // file yang sudah ada di folder baru tidak ditimpa
       errorOnExist: false,
-      filter: (src) => !skip.test(path.basename(src)) && !/\.(bin|tmp|lock)$/i.test(src) && path.basename(src) !== "lockfile",
+      filter: (src) =>
+        !skip.test(path.basename(src)) &&
+        !/\.(bin|tmp|lock)$/i.test(src) &&
+        path.basename(src) !== "lockfile",
     });
   }
 } catch (e) {
@@ -213,10 +285,11 @@ if (!config.hardwareAcceleration) app.disableHardwareAcceleration();
 // ---------------------------------------------------------------
 // State
 // ---------------------------------------------------------------
-// Tab: { id, view, suspended, saved, lastActive, favicon, errorUrl, restoring }
+// Tab: { id, view, suspended, saved, lastActive, favicon, errorUrl, restoring, keepAlive }
 //  - view      : WebContentsView (null kalau tab sedang tidur)
 //  - saved     : { entries, index, snap } milik tab yang tidur
 //  - errorUrl  : url asli yang gagal dimuat (ditampilkan di address bar)
+//  - keepAlive : true setelah izin mikrofon/kamera diberikan; tab tidak ditidurkan sampai navigasi berikutnya
 const tabs = new Map();
 let activeId = null;
 let nextId = 1;
@@ -238,9 +311,10 @@ let countTimer = null;
 function toUrl(input) {
   const text = String(input || "").trim();
   if (!text) return NEWTAB_URL;
-  const internal = /^(?:syptek|sift):\/\/(history|bookmarks|about|credits)\/?$/i.exec(
-    text,
-  );
+  const internal =
+    /^(?:syptek|sift):\/\/(history|bookmarks|about|credits|settings)\/?$/i.exec(
+      text,
+    );
   if (internal) return PAGES[internal[1].toLowerCase()];
   if (
     /^[a-z][a-z0-9+.-]*:\/\//i.test(text) ||
@@ -316,11 +390,30 @@ function tabState(tab) {
   };
 }
 
-const pushTab = (tab) =>
-  tabs.has(tab.id) && sendUI("tab:update", tabState(tab));
+// Judul jendela = judul tab aktif ("(96) WhatsApp - Syptek"). Windows memakainya untuk preview taskbar dan Alt+Tab.
+let winTitle = "";
+function syncWindowTitle(s) {
+  if (!win || win.isDestroyed()) return;
+  const t = s?.title ? `${String(s.title).slice(0, 200)} - Syptek` : "Syptek";
+  if (t === winTitle) return;
+  winTitle = t;
+  win.setTitle(t);
+}
+
+const pushTab = (tab) => {
+  if (!tabs.has(tab.id)) return;
+  const s = tabState(tab);
+  sendUI("tab:update", s);
+  if (tab.id === activeId) syncWindowTitle(s);
+};
 const refreshActive = () => activeTab() && pushTab(activeTab());
 
 function layout() {
+  layoutViews();
+  findLayout();
+}
+
+function layoutViews() {
   if (!win || win.isDestroyed()) return;
   const [w, h] = win.getContentSize();
   const tab = activeTab();
@@ -411,7 +504,10 @@ function focusAddress() {
 // Argumen untuk preload halaman: beri tahu apakah shim Chrome berlaku di semua situs (juga di iframe)
 function shimPrefs() {
   return config.identity.chromeShim === "all"
-    ? { additionalArguments: ["--syptek-shim=all"], nodeIntegrationInSubFrames: true }
+    ? {
+        additionalArguments: ["--syptek-shim=all"],
+        nodeIntegrationInSubFrames: true,
+      }
     : {};
 }
 
@@ -466,6 +562,8 @@ function buildView(tab) {
   wc.on("did-navigate", (_e, url) => {
     if (!live()) return;
     tab.favicon = "";
+    tab.keepAlive = false; // izin media berlaku untuk halaman ini saja
+    findReset(tab);
     if (!url.startsWith(ERROR_URL)) {
       tab.errorUrl = "";
       record(url);
@@ -549,7 +647,8 @@ function setupPopupWindow(child) {
   child.setMenuBarVisibility(false);
   spoofUA(cwc);
   cwc.on("did-start-navigation", (e) => {
-    if (e.isMainFrame && !cwc.isDestroyed() && !cwc.debugger.isAttached()) spoofUA(cwc);
+    if (e.isMainFrame && !cwc.isDestroyed() && !cwc.debugger.isAttached())
+      spoofUA(cwc);
   });
   cwc.setWindowOpenHandler(({ url: target }) => {
     if (isWeb(target)) createTab(target);
@@ -585,6 +684,7 @@ function activateTab(id) {
   const next = tabs.get(id);
   if (!next) return;
   sgHide(); // dropdown saran akan tertutup view halaman
+  if (find.open && find.tabId !== id) findClose(false); // bar cari milik tab sebelumnya
   const prev = activeTab();
   if (prev && prev !== next) {
     prev.lastActive = Date.now(); // hitung "menganggur" sejak ditinggalkan
@@ -633,6 +733,7 @@ function closeTab(id) {
     if (closedTabs.length > 10) closedTabs.shift();
   }
 
+  if (find.open && find.tabId === id) findClose(false);
   if (wasActive && tab.view) {
     try {
       win.contentView.removeChildView(tab.view);
@@ -746,8 +847,24 @@ function reload(id) {
 // WebContents-nya dihancurkan (RAM kembali), tapi judul, ikon, riwayat
 // back/forward dan posisi scroll disimpan dan dipulihkan saat tab dibuka.
 // ---------------------------------------------------------------
+// Host yang tidak boleh ditidurkan (WhatsApp Web, Meet, dsb.): cocok dengan host itu sendiri dan subdomainnya
+let neverSuspendSet = null;
+function neverSuspendHost(url) {
+  if (!neverSuspendSet) {
+    const list = Array.isArray(config.tabSuspend.neverSuspend)
+      ? config.tabSuspend.neverSuspend
+      : [];
+    neverSuspendSet = new Set(
+      list.map((d) => String(d).trim().toLowerCase()).filter(Boolean),
+    );
+  }
+  const host = hostOf(url);
+  return !!host && inSet(neverSuspendSet, host);
+}
+
 function canSuspend(tab) {
-  if (tab.id === activeId || tab.suspended || !tab.view) return false;
+  if (tab.id === activeId || tab.suspended || !tab.view || tab.keepAlive)
+    return false;
   const wc = tab.view.webContents;
   if (
     wc.isDestroyed() ||
@@ -756,7 +873,8 @@ function canSuspend(tab) {
     wc.isDevToolsOpened()
   )
     return false;
-  return !wc.getURL().startsWith(ERROR_URL);
+  const url = wc.getURL();
+  return !url.startsWith(ERROR_URL) && !neverSuspendHost(url);
 }
 
 function suspend(tab) {
@@ -797,15 +915,33 @@ function resume(tab) {
   }
 }
 
+// RAM kosong di bawah ambang? (macOS dilewati: os.freemem() di sana tidak menghitung cache, jadi selalu tampak "rendah")
+function memoryPressure() {
+  const pct = Number(config.tabSuspend.lowMemory?.freePercent);
+  if (!(pct > 0) || process.platform === "darwin") return false;
+  return os.freemem() / os.totalmem() < pct / 100;
+}
+
 function suspendIdle(force) {
-  const limit =
-    Math.max(1, Number(config.tabSuspend.afterMinutes) || 5) * 60_000;
-  const now = Date.now();
-  for (const tab of tabs.values()) {
-    if (!canSuspend(tab)) continue;
-    if (!force && now - tab.lastActive < limit) continue;
-    suspend(tab);
+  if (force) {
+    for (const tab of tabs.values()) if (canSuspend(tab)) suspend(tab);
+    return;
   }
+  const minutes = (n, fallback) => Math.max(1, Number(n) || fallback) * 60_000;
+  const normal = minutes(config.tabSuspend.afterMinutes, 5);
+  const pressure = memoryPressure();
+  const limit = pressure
+    ? Math.min(normal, minutes(config.tabSuspend.lowMemory?.afterMinutes, 1))
+    : normal;
+  const now = Date.now();
+  const idle = [...tabs.values()].filter(
+    (tab) => canSuspend(tab) && now - tab.lastActive >= limit,
+  );
+  if (pressure) {
+    idle.sort((a, b) => a.lastActive - b.lastActive); // terlama dipakai lebih dulu
+    idle.splice(2); // maks 2 tab per siklus
+  }
+  for (const tab of idle) suspend(tab);
 }
 
 // ---------------------------------------------------------------
@@ -863,8 +999,12 @@ function showMenu() {
     { label: "Sleep background tabs", click: () => suspendIdle(true) },
     { label: `${sleeping} tab(s) sleeping`, enabled: false },
     { type: "separator" },
-    { label: "Reset site permissions", click: () => stores.permissions.clear() },
+    {
+      label: "Reset site permissions",
+      click: () => stores.permissions.clear(),
+    },
     { type: "separator" },
+    { label: "Settings", click: () => openInternal("settings") },
     { label: "About Syptek", click: () => openInternal("about") },
     { label: "Credits", click: () => openInternal("credits") },
   ]).popup({ window: win });
@@ -925,7 +1065,24 @@ function showSiteMenu() {
   template.push(
     { label: "Notifications: always blocked", enabled: false },
     { type: "separator" },
-    { label: "Reset permissions for this site", click: () => perms.clearOrigin(origin) },
+    {
+      label: "Reset permissions for this site",
+      click: () => perms.clearOrigin(origin),
+    },
+    ...(blocker
+      ? [
+          { type: "separator" },
+          {
+            label: isSitePaused(origin)
+              ? "Ad blocker: paused on this site (click to resume)"
+              : "Pause ad blocker on this site",
+            click: () => {
+              togglePause(origin);
+              reload(activeId);
+            },
+          },
+        ]
+      : []),
     {
       label: "Reload page (to apply changes)",
       click: () => reload(activeId),
@@ -995,11 +1152,31 @@ function showContextMenu(wc, p) {
       { label: "Reload", click: () => reload(activeId) },
     ]);
   }
-  if (adblockOn && isWeb(wc.getURL())) {
-    groups.push([
-      { label: "Block this element", click: () => blockElement(wc, p.x, p.y, false) },
-      { label: "Block similar banners", click: () => blockElement(wc, p.x, p.y, true) },
-    ]);
+  if (blocker && isWeb(wc.getURL())) {
+    const site = siteKey(wc.getURL());
+    const group = [];
+    if (adblockOn && !isSitePaused(wc.getURL())) {
+      group.push(
+        {
+          label: "Block this element",
+          click: () => blockElement(wc, p.x, p.y, false),
+        },
+        {
+          label: "Block similar banners",
+          click: () => blockElement(wc, p.x, p.y, true),
+        },
+      );
+    }
+    group.push({
+      label: isSitePaused(wc.getURL())
+        ? `Resume ad blocker on ${site}`
+        : `Pause ad blocker on ${site}`,
+      click: () => {
+        togglePause(wc.getURL());
+        wc.reload();
+      },
+    });
+    groups.push(group);
   }
   groups.push([
     {
@@ -1051,6 +1228,9 @@ function handleShortcut(event, input) {
   } else if (ctrl && key === "tab") cycleTab(input.shift ? -1 : 1);
   else if (key === "f12" || (ctrl && input.shift && key === "i"))
     toggleDevTools();
+  else if (ctrl && !input.shift && key === "f") findOpen();
+  else if (find.open && key === "escape" && !sg.editing) findClose();
+  else if (find.open && key === "f3") findRun(find.text, !input.shift);
   else if (ctrl && (key === "=" || key === "+"))
     wc?.setZoomLevel(wc.getZoomLevel() + 0.5);
   else if (ctrl && key === "-") wc?.setZoomLevel(wc.getZoomLevel() - 0.5);
@@ -1183,15 +1363,23 @@ function askPermission(origin, keys) {
 
 function setupPermissions(ses) {
   ses.setPermissionRequestHandler(async (wc, permission, callback, details) => {
+    // Mikrofon/kamera yang diizinkan = tab sedang dipakai (panggilan, rapat): jangan ditidurkan
+    const grant = (allow) => {
+      if (allow && permission === "media") {
+        const tab = wc && tabOf(wc);
+        if (tab) tab.keepAlive = true;
+      }
+      callback(allow);
+    };
     if (ALWAYS_ALLOWED.has(permission)) return callback(true);
     const origin = originOf(details?.requestingUrl || wc?.getURL?.());
     if (!ASKABLE.has(permission) || !origin) return callback(false);
     const keys = permKeys(permission, details?.mediaTypes);
     const known = keys.map((k) => stores.permissions.get(origin, k));
     if (known.includes(false)) return callback(false);
-    if (known.every((v) => v === true)) return callback(true);
+    if (known.every((v) => v === true)) return grant(true);
     try {
-      callback(
+      grant(
         await askPermission(
           origin,
           keys.filter((_k, i) => known[i] === undefined),
@@ -1292,7 +1480,8 @@ function setupDns() {
 // Filter buatan sendiri: klik kanan banner > "Block this element".
 // Aturan disimpan di custom-filters.txt (folder userData), format uBO: situs.com##selector
 // ---------------------------------------------------------------
-const customFiltersFile = () => path.join(app.getPath("userData"), "custom-filters.txt");
+const customFiltersFile = () =>
+  path.join(app.getPath("userData"), "custom-filters.txt");
 
 function readCustomFilters() {
   try {
@@ -1313,7 +1502,13 @@ function pickScript(x, y) {
   const labels = location.hostname.replace(/^www\./, "").split(".");
   const n = labels.length;
   const sld = ["co", "com", "or", "go", "ac", "net", "web", "my", "sch"];
-  const base = labels.slice(n >= 3 && labels[n - 1].length === 2 && sld.includes(labels[n - 2]) ? -3 : -2).join(".");
+  const base = labels
+    .slice(
+      n >= 3 && labels[n - 1].length === 2 && sld.includes(labels[n - 2])
+        ? -3
+        : -2,
+    )
+    .join(".");
   const esc = (s) => (window.CSS && CSS.escape ? CSS.escape(s) : s);
   const valid = (s) => {
     try {
@@ -1325,14 +1520,20 @@ function pickScript(x, y) {
   const isExternal = (a) => {
     try {
       const u = new URL(a.href);
-      return /^https?:$/.test(u.protocol) && !u.hostname.endsWith(base) ? u.hostname : "";
+      return /^https?:$/.test(u.protocol) && !u.hostname.endsWith(base)
+        ? u.hostname
+        : "";
     } catch {
       return "";
     }
   };
   const chain = (node) => {
     const parts = [];
-    for (let c = node, d = 0; c && c.nodeType === 1 && c !== document.documentElement && d < 6; c = c.parentElement, d++) {
+    for (
+      let c = node, d = 0;
+      c && c.nodeType === 1 && c !== document.documentElement && d < 6;
+      c = c.parentElement, d++
+    ) {
       if (c.id && !/\d{3,}/.test(c.id)) {
         parts.unshift("#" + esc(c.id));
         break;
@@ -1342,8 +1543,12 @@ function pickScript(x, y) {
         parts.unshift("body");
         break;
       }
-      const same = c.parentElement ? [...c.parentElement.children].filter((k) => k.tagName === c.tagName) : [];
-      parts.unshift(same.length > 1 ? `${tag}:nth-of-type(${same.indexOf(c) + 1})` : tag);
+      const same = c.parentElement
+        ? [...c.parentElement.children].filter((k) => k.tagName === c.tagName)
+        : [];
+      parts.unshift(
+        same.length > 1 ? `${tag}:nth-of-type(${same.indexOf(c) + 1})` : tag,
+      );
     }
     return parts.join(" > ");
   };
@@ -1354,21 +1559,33 @@ function pickScript(x, y) {
   let similar = "";
   if (ext) {
     let c = a.parentElement;
-    for (let i = 0; i < 3 && c && c !== document.body; i++, c = c.parentElement) {
-      const hits = [...c.querySelectorAll("a[href]")].filter((k) => isExternal(k) && k.querySelector("img"));
+    for (
+      let i = 0;
+      i < 3 && c && c !== document.body;
+      i++, c = c.parentElement
+    ) {
+      const hits = [...c.querySelectorAll("a[href]")].filter(
+        (k) => isExternal(k) && k.querySelector("img"),
+      );
       if (hits.length >= 2) {
         similar = `${chain(c)} a[href^="http"]:not([href*="${base}"]):has(img)`;
         break;
       }
     }
   }
-  return { base, specific: valid(specific) ? specific : "", similar: similar && valid(similar) ? similar : "" };
+  return {
+    base,
+    specific: valid(specific) ? specific : "",
+    similar: similar && valid(similar) ? similar : "",
+  };
 }
 
 async function blockElement(wc, x, y, similar) {
   let r = null;
   try {
-    r = await wc.executeJavaScript(`(${pickScript.toString()})(${x | 0},${y | 0})`);
+    r = await wc.executeJavaScript(
+      `(${pickScript.toString()})(${x | 0},${y | 0})`,
+    );
   } catch {}
   const sel = r && (similar ? r.similar || r.specific : r.specific);
   if (!sel || /[\r\n]/.test(sel)) return;
@@ -1384,21 +1601,52 @@ async function blockElement(wc, x, y, similar) {
   wc.insertCSS(`${sel}{display:none!important}`).catch(() => {}); // langsung hilang di halaman ini
 }
 
-// Popup / tab iklan: dicocokkan dengan daftar filter yang sama, plus pembatas spam (maks 1 per detik per tab)
+// Popup / tab iklan. Aturannya sengaja konservatif supaya tidak merusak login & link biasa:
+//  - tujuan satu situs dengan halaman asal, host/alur login, dan situs yang di-pause: selalu boleh
+//  - filter generik (tanpa tipe, mis. /ads/ atau ||domain^) TIDAK dihitung, karena di mesin ini
+//    filter semacam itu juga cocok untuk navigasi halaman biasa
+//  - yang diblokir: tujuan lintas situs yang cocok dengan filter khusus dokumen ($document/$popup),
+//    atau spam popup lintas situs (lebih dari 2 dalam 1 detik dari tab yang sama)
 const popupTimes = new WeakMap();
 function popupBlocked(wc, target) {
-  if (!config.adblock.popups || !adblockOn || !blocker || !isWeb(target)) return false;
+  if (!config.adblock.popups || !adblockOn || !blocker || !isWeb(target))
+    return false;
   if (isAllowlisted({ url: target, webContents: wc })) return false;
-  let hit = false;
+  let req;
   try {
     const { Request } = require("@ghostery/adblocker");
-    hit = blocker.match(
-      Request.fromRawDetails({ url: target, sourceUrl: wc.getURL(), type: "mainFrame" }),
-    ).match;
+    const src = wc.getURL();
+    // Untuk tipe mainFrame, Ghostery selalu menganggap isThirdParty=false, jadi lintas-situs dihitung dengan tipe "other"
+    const cross = Request.fromRawDetails({
+      url: target,
+      sourceUrl: src,
+      type: "other",
+    }).isThirdParty;
+    if (!cross) return false; // satu situs dengan halaman asal: selalu boleh
+    req = Request.fromRawDetails({
+      url: target,
+      sourceUrl: src,
+      type: "mainFrame",
+    });
+  } catch {
+    return false;
+  }
+  let hit = false;
+  try {
+    const m = blocker.match(req);
+    hit = !!(
+      m.match &&
+      m.filter &&
+      typeof m.filter.fromAny === "function" &&
+      !m.filter.fromAny()
+    );
   } catch {}
   const now = Date.now();
-  const spam = now - (popupTimes.get(wc) || 0) < 1000;
-  popupTimes.set(wc, now);
+  const recent = popupTimes.get(wc) || [];
+  const times = recent.filter((t) => now - t < 1000);
+  times.push(now);
+  popupTimes.set(wc, times);
+  const spam = times.length > 2;
   if (hit || spam) {
     if (config.adblock.debug) console.log("[adblock] popup diblokir:", target);
     blockedCount++;
@@ -1412,42 +1660,232 @@ function adblockState() {
   return { available: !!blocker, enabled: adblockOn, blocked: blockedCount };
 }
 
-// Apakah request ini milik situs yang dikecualikan (allowlist)?
-function isAllowlisted(details) {
-  const allow = config.adblock.allowlist;
-  if (!Array.isArray(allow) || allow.length === 0) return false;
-  const candidates = [
-    details.url,
-    details.webContents?.getURL?.(),
-    details.referrer,
-  ];
-  return candidates.some((u) => {
+// ---------------------------------------------------------------
+// Pengaman: ad blocker tidak boleh merusak login, captcha, dan pembayaran.
+//  1. Host login/captcha/pembayaran bawaan + config.adblock.neverBlock + allowlist tidak disentuh.
+//  2. Situs yang di-pause lewat menu klik kanan / menu situs (disimpan di adblock-paused.txt).
+//  3. URL yang jelas berupa alur login (/oauth, /authorize, /login, /sso, ...) tidak diblokir.
+//  4. Navigasi halaman utama tidak pernah diblokir; handler yang error = request dilepas (fail-open).
+// ---------------------------------------------------------------
+const AUTH_HOSTS = [
+  "accounts.google.com",
+  "accounts.youtube.com",
+  "login.microsoftonline.com",
+  "login.live.com",
+  "login.microsoft.com",
+  "appleid.apple.com",
+  "idmsa.apple.com",
+  "github.com",
+  "gitlab.com",
+  "auth0.com",
+  "okta.com",
+  "oktacdn.com",
+  "recaptcha.net",
+  "hcaptcha.com",
+  "challenges.cloudflare.com",
+  "paypal.com",
+  "stripe.com",
+  "midtrans.com",
+  "xendit.co",
+];
+const AUTH_PATH =
+  /\/(oauth2?|authorize|authorization|sso|saml2?|openid|signin|sign-in|login|logon|auth)(\/|$)/i;
+
+const hostOf = (u) => {
+  try {
+    return new URL(u).hostname.toLowerCase();
+  } catch {
+    return "";
+  }
+};
+// cocokkan host dan semua induk domainnya: a.b.com -> a.b.com, b.com, com
+function inSet(set, host) {
+  while (host) {
+    if (set.has(host)) return true;
+    const i = host.indexOf(".");
+    if (i < 0) return false;
+    host = host.slice(i + 1);
+  }
+  return false;
+}
+
+let exemptSet = null;
+function exemptHosts() {
+  if (!exemptSet) {
+    const extra = [
+      ...(config.adblock.allowlist || []),
+      ...(config.adblock.neverBlock || []),
+    ];
+    exemptSet = new Set(
+      [...AUTH_HOSTS, ...extra]
+        .map((d) => String(d).trim().toLowerCase())
+        .filter(Boolean),
+    );
+  }
+  return exemptSet;
+}
+
+// Situs yang di-pause oleh pengguna (runtime, bertahan antar sesi)
+const pausedFile = () =>
+  path.join(app.getPath("userData"), "adblock-paused.txt");
+let pausedSites = null;
+function paused() {
+  if (!pausedSites) {
     try {
-      const host = new URL(u).hostname;
-      return allow.some((d) => host === d || host.endsWith("." + d));
+      pausedSites = new Set(
+        fs
+          .readFileSync(pausedFile(), "utf8")
+          .split(/\r?\n/)
+          .map((l) => l.trim().toLowerCase())
+          .filter(Boolean),
+      );
     } catch {
-      return false;
+      pausedSites = new Set();
     }
-  });
+  }
+  return pausedSites;
+}
+const siteKey = (url) => hostOf(url).replace(/^www\./, "");
+function isSitePaused(url) {
+  const k = siteKey(url);
+  return !!k && inSet(paused(), k);
+}
+function togglePause(url) {
+  const k = siteKey(url);
+  if (!k) return;
+  const set = paused();
+  if (set.has(k)) set.delete(k);
+  else set.add(k);
+  try {
+    fs.writeFileSync(pausedFile(), [...set].join("\n") + "\n");
+  } catch (e) {
+    console.error("[adblock] gagal menyimpan daftar pause:", e.message);
+  }
+}
+
+// Sumber request yang benar untuk mesin filter: dokumen/frame yang meminta, bukan header Referer
+// (Referer kosong di banyak login & player karena Referrer-Policy, sehingga $domain= dan pengecualian unbreak gagal).
+function sourceUrlOf(details) {
+  try {
+    const u = details.frame && details.frame.url;
+    if (u) return u;
+  } catch {}
+  try {
+    const u = details.webContents && details.webContents.getURL();
+    if (u) return u;
+  } catch {}
+  return details.referrer || "";
+}
+
+// Apakah request/halaman ini harus dibiarkan lewat sepenuhnya?
+function isAllowlisted(details) {
+  try {
+    const ex = exemptHosts();
+    const urls = [details.url, sourceUrlOf(details), details.referrer];
+    try {
+      urls.push(details.webContents && details.webContents.getURL());
+    } catch {}
+    for (const u of urls) {
+      const h = hostOf(u);
+      if (h && (inSet(ex, h) || inSet(paused(), h.replace(/^www\./, ""))))
+        return true;
+    }
+    if (details.url && /^https?:/i.test(details.url)) {
+      try {
+        if (AUTH_PATH.test(new URL(details.url).pathname)) return true;
+      } catch {}
+    }
+  } catch {}
+  return false;
 }
 
 function enableBlocking() {
   const ses = session.defaultSession;
   blocker.enableBlockingInSession(ses);
-  if (
-    !Array.isArray(config.adblock.allowlist) ||
-    config.adblock.allowlist.length === 0
-  )
-    return;
-  // Bungkus handler bawaan supaya situs di allowlist tidak disentuh sama sekali
+  // Bungkus handler bawaan: pengecualian, sumber request yang benar, dan fail-open
   const filter = { urls: ["<all_urls>"] };
-  ses.webRequest.onBeforeRequest(filter, (details, cb) =>
-    isAllowlisted(details) ? cb({}) : blocker.onBeforeRequest(details, cb),
-  );
-  ses.webRequest.onHeadersReceived(filter, (details, cb) =>
-    isAllowlisted(details) ? cb({}) : blocker.onHeadersReceived(details, cb),
-  );
+  ses.webRequest.onBeforeRequest(filter, (details, cb) => {
+    let called = false;
+    const once = (r) => {
+      if (called) return;
+      called = true;
+      cb(r);
+    };
+    try {
+      if (details.resourceType === "mainFrame" || isAllowlisted(details))
+        return once({});
+      blocker.onBeforeRequest(
+        { ...details, referrer: sourceUrlOf(details) },
+        once,
+      );
+    } catch (err) {
+      if (config.adblock.debug)
+        console.warn(
+          "[adblock] onBeforeRequest error, request dilepas:",
+          err.message,
+        );
+      once({});
+    }
+  });
+  ses.webRequest.onHeadersReceived(filter, (details, cb) => {
+    let called = false;
+    const once = (r) => {
+      if (called) return;
+      called = true;
+      cb(r);
+    };
+    try {
+      if (isAllowlisted(details)) return once({});
+      blocker.onHeadersReceived(details, once);
+    } catch {
+      once({});
+    }
+  });
 }
+
+// Scriptlet untuk satu frame, dibungkus fungsi sendiri-sendiri + try/catch agar tidak saling bentrok
+// dan satu scriptlet yang error tidak menjatuhkan yang lain.
+const wrapScriptlet = (code) => `(function(){try{\n${code}\n}catch(e){}})();`;
+function scriptletsFor(url, wc) {
+  if (
+    !adblockOn ||
+    !blocker ||
+    !config.adblock.cosmetic ||
+    config.adblock.scriptlets === false
+  )
+    return [];
+  if (!isWeb(url) || isAllowlisted({ url, webContents: wc })) return [];
+  const { Request } = require("@ghostery/adblocker");
+  const r = Request.fromRawDetails({ url, type: "mainFrame" });
+  const { active, scripts } = blocker.getCosmeticsFilters({
+    domain: r.domain,
+    hostname: r.hostname,
+    url,
+    classes: [],
+    hrefs: [],
+    ids: [],
+    getBaseRules: false,
+    getInjectionRules: true,
+    getExtendedRules: false,
+    getRulesFromHostname: true,
+    getRulesFromDOM: false,
+  });
+  if (active === false || !scripts.length) return [];
+  if (config.adblock.debug)
+    console.log(`[adblock] ${scripts.length} scriptlet ->`, url);
+  return scripts.map(wrapScriptlet);
+}
+// sendSync: harus selalu menjawab (returnValue), kalau tidak preload halaman akan menggantung
+ipcMain.on("syptek:scriptlets", (e) => {
+  let out = [];
+  try {
+    out = scriptletsFor(e.senderFrame?.url || "", e.sender);
+  } catch (err) {
+    if (config.adblock.debug)
+      console.warn("[adblock] scriptlet error:", err.message);
+  }
+  e.returnValue = out;
+});
 
 async function setupAdblock() {
   if (!config.adblock.enabled) return;
@@ -1458,18 +1896,24 @@ async function setupAdblock() {
     let lists;
     if (level === "ublock") {
       const custom = config.adblock.lists;
-      lists = Array.isArray(custom) && custom.length ? custom : DEFAULT_ADBLOCK_LISTS;
+      lists =
+        Array.isArray(custom) && custom.length ? custom : DEFAULT_ADBLOCK_LISTS;
     } else {
       lists = level === "adsAndTracking" ? adsAndTrackingLists : adsLists;
     }
     // Nama cache memuat pengaturan + daftar, supaya mengubah config tidak memakai cache lama
     const flags = `${config.adblock.csp ? "c" : ""}${config.adblock.html ? "h" : ""}`;
-    const sig = require("crypto").createHash("sha1").update(lists.join("\n") + flags).digest("hex").slice(0, 8);
+    const sig = require("crypto")
+      .createHash("sha1")
+      .update(lists.join("\n") + flags)
+      .digest("hex")
+      .slice(0, 8);
     const cacheName = `adblock-${level}-${cosmetic ? "cos" : "net"}-${sig}.bin`;
     // Cache dibuang tiap 3 hari supaya filter ikut diperbarui
     try {
       const f = path.join(app.getPath("userData"), cacheName);
-      if (Date.now() - fs.statSync(f).mtimeMs > 3 * 24 * 3600 * 1000) fs.unlinkSync(f);
+      if (Date.now() - fs.statSync(f).mtimeMs > 3 * 24 * 3600 * 1000)
+        fs.unlinkSync(f);
     } catch {}
     blocker = await ElectronBlocker.fromLists(
       fetch,
@@ -1487,10 +1931,42 @@ async function setupAdblock() {
     );
     const extra = readCustomFilters();
     if (extra.length) blocker.updateFromDiff({ added: extra });
-    // Situs di allowlist juga tidak boleh disentuh pembersih elemen/scriptlet (bukan hanya request jaringan)
-    const injectOrig = blocker.onInjectCosmeticFilters;
-    blocker.onInjectCosmeticFilters = (event, url, msg) =>
-      isAllowlisted({ url, webContents: event.sender }) ? undefined : injectOrig(event, url, msg);
+    // Ghostery menjalankan scriptlet SETELAH halaman mulai, sebagai skrip global terpisah: scriptlet yang
+    // berbagi class (JSONPath, RangeParser, ...) saling bentrok ("Identifier ... has already been declared"),
+    // sehingga aturan uBO (mis. IDLIX) hanya berlaku sebagian dan request pertama lolos. Jadi di sini hanya
+    // CSS (sembunyikan elemen) yang dibiarkan lewat Ghostery; scriptlet diinjeksi dini oleh pagepreload.js
+    // lewat IPC "syptek:scriptlets" (tiap scriptlet dibungkus fungsi sendiri).
+    blocker.onInjectCosmeticFilters = (event, url, msg) => {
+      try {
+        if (isAllowlisted({ url, webContents: event.sender })) return;
+        const { Request } = require("@ghostery/adblocker");
+        const r = Request.fromRawDetails({ url, type: "mainFrame" });
+        const first = msg === undefined;
+        const { active, styles } = blocker.getCosmeticsFilters({
+          domain: r.domain,
+          hostname: r.hostname,
+          url,
+          classes: msg?.classes,
+          hrefs: msg?.hrefs,
+          ids: msg?.ids,
+          getBaseRules: first,
+          getInjectionRules: false,
+          getExtendedRules: false,
+          getRulesFromHostname: first,
+          getRulesFromDOM: !first,
+          callerContext: {
+            frameId: event.frameId,
+            processId: event.processId,
+            lifecycle: msg?.lifecycle,
+          },
+        });
+        if (active === false || !styles.length) return;
+        event.sender.insertCSS(styles, { cssOrigin: "user" }).catch(() => {});
+      } catch (err) {
+        if (config.adblock.debug)
+          console.warn("[adblock] cosmetic error:", err.message);
+      }
+    };
     enableBlocking();
     adblockOn = true;
     blocker.on("request-blocked", (request) => {
@@ -1549,6 +2025,7 @@ function createWindow() {
   win.once("ready-to-show", () => win.show());
 
   // UI browser sendiri tidak boleh berpindah halaman / membuka jendela
+  win.on("page-title-updated", (e) => e.preventDefault()); // judul jendela diatur syncWindowTitle(), bukan <title> index.html
   win.webContents.on("will-navigate", (e) => e.preventDefault());
   win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   win.webContents.on("before-input-event", handleShortcut);
@@ -1573,6 +2050,9 @@ function createWindow() {
     win = null;
     sg.view = null;
     sg.open = false;
+    find.view = null;
+    find.open = false;
+    find.ready = false;
     tabs.clear();
   });
 }
@@ -1839,6 +2319,189 @@ function sgMove(dir) {
   sgPaint();
 }
 
+// ---------------------------------------------------------------
+// Cari di halaman (Ctrl+F). Pola sama dengan dropdown saran: WebContentsView kecil
+// yang dibuat saat dipakai dan dibuang 30 detik setelah ditutup. Bar hanya hidup
+// untuk satu tab; pindah tab menutupnya.
+// ---------------------------------------------------------------
+const FIND_W = 340;
+const FIND_H = 44;
+const find = {
+  view: null,
+  ready: false, // find.html sudah selesai dimuat
+  open: false,
+  tabId: 0,
+  text: "", // teks terakhir di kotak cari
+  last: "", // teks yang sedang dicari di halaman ("" = belum ada sesi)
+  queriedAt: 0,
+  off: null, // lepas listener found-in-page
+  destroyTimer: null,
+};
+
+function findWC() {
+  const wc = tabs.get(find.tabId)?.view?.webContents;
+  return wc && !wc.isDestroyed() ? wc : null;
+}
+
+function findSend(channel, payload) {
+  const wc = find.view?.webContents;
+  if (find.ready && wc && !wc.isDestroyed()) wc.send(channel, payload);
+}
+
+function findView() {
+  clearTimeout(find.destroyTimer);
+  if (find.view) return find.view;
+  const view = new WebContentsView({
+    webPreferences: {
+      sandbox: true,
+      contextIsolation: true,
+      nodeIntegration: false,
+      preload: path.join(__dirname, "findpreload.js"),
+    },
+  });
+  view.setBackgroundColor("#1c1c22");
+  try {
+    view.setBorderRadius(10);
+  } catch {}
+  view.setVisible(false);
+  const wc = view.webContents;
+  wc.on("before-input-event", handleShortcut); // Ctrl+F/Esc/F3 tetap jalan saat fokus di bar
+  wc.on("will-navigate", (e) => e.preventDefault());
+  wc.setWindowOpenHandler(() => ({ action: "deny" }));
+  wc.once("did-finish-load", () => {
+    if (find.view !== view) return;
+    find.ready = true;
+    if (find.open) findInit();
+  });
+  wc.loadFile(path.join(RENDERER_DIR, "find.html")).catch(() => {});
+  win.contentView.addChildView(view);
+  find.view = view;
+  find.ready = false;
+  return view;
+}
+
+// Isi kotak cari dengan teks terakhir, fokus ke sana, dan cari ulang kalau ada teks
+function findInit() {
+  findSend("find:show", { text: find.text });
+  find.view?.webContents.focus();
+  if (find.text) findRun(find.text, true);
+}
+
+function findLayout() {
+  if (!find.view || !find.open || !win || win.isDestroyed()) return;
+  const b = activeTab()?.view?.getBounds();
+  if (!b) return;
+  const width = Math.min(FIND_W, Math.max(200, b.width - 24));
+  // 20px dari tepi kanan = di kiri scrollbar halaman
+  find.view.setBounds({
+    x: b.x + b.width - width - 20,
+    y: b.y + 6,
+    width,
+    height: FIND_H,
+  });
+  // DevTools yang baru dibuka bisa menutupi bar; angkat lagi (kecuali dropdown saran sedang terbuka)
+  const kids = win.contentView.children;
+  if (!sg.open && kids[kids.length - 1] !== find.view)
+    win.contentView.addChildView(find.view);
+}
+
+function findOpen() {
+  const tab = activeTab();
+  const wc = tab?.view?.webContents;
+  if (!win || win.isDestroyed() || !wc || wc.isDestroyed()) return;
+  if (find.open) {
+    find.view?.webContents.focus();
+    findSend("find:show", { text: find.text }); // fokus + pilih semua teks
+    return;
+  }
+  sgHide();
+  find.open = true;
+  find.tabId = tab.id;
+  find.last = "";
+  const onFound = (_e, r) => {
+    if (!r.finalUpdate && !(r.matches > 0)) return; // abaikan update sementara yang kosong
+    findSend("find:result", { ord: r.activeMatchOrdinal, total: r.matches });
+    // findInPage bisa memindahkan fokus ke halaman: kembalikan ke kotak cari
+    if (r.finalUpdate && Date.now() - find.queriedAt < 500)
+      find.view?.webContents.focus();
+  };
+  wc.on("found-in-page", onFound);
+  find.off = () => wc.removeListener("found-in-page", onFound);
+  const view = findView();
+  findLayout();
+  win.contentView.addChildView(view); // naik ke lapisan paling atas
+  view.setVisible(true);
+  if (find.ready) findInit();
+}
+
+function findClose(refocusPage = true) {
+  if (!find.open) return;
+  find.open = false;
+  find.off?.();
+  find.off = null;
+  find.last = "";
+  const wc = findWC();
+  if (wc) {
+    try {
+      wc.stopFindInPage("clearSelection");
+    } catch {}
+  }
+  find.view?.setVisible(false);
+  clearTimeout(find.destroyTimer);
+  find.destroyTimer = setTimeout(findDestroy, 30_000);
+  if (refocusPage && wc) wc.focus();
+}
+
+function findDestroy() {
+  const view = find.view;
+  if (!view || find.open) return;
+  find.view = null;
+  find.ready = false;
+  try {
+    win?.contentView.removeChildView(view);
+  } catch {}
+  if (!view.webContents.isDestroyed()) view.webContents.close();
+}
+
+// Navigasi penuh: sorotan lama tidak berlaku lagi. Bar tetap terbuka; Enter memulai pencarian baru.
+function findReset(tab) {
+  if (!find.open || find.tabId !== tab.id) return;
+  find.last = "";
+  findSend("find:result", { ord: 0, total: 0 });
+}
+
+// findNext di Electron berarti "mulai sesi baru" (true = pencarian baru, false = lanjut ke hasil berikutnya)
+function findRun(text, forward) {
+  const wc = findWC();
+  if (!find.open || !wc) return;
+  find.text = text;
+  if (!text) {
+    find.last = "";
+    wc.stopFindInPage("clearSelection"); // jangan pernah kirim teks kosong ke findInPage
+    findSend("find:result", { ord: 0, total: 0 });
+    return;
+  }
+  const fresh = text !== find.last;
+  find.last = text;
+  find.queriedAt = Date.now();
+  wc.findInPage(text, { forward: !!forward, findNext: fresh });
+  find.view?.webContents.focus();
+}
+
+const fromFind = (e) =>
+  !!find.view &&
+  !find.view.webContents.isDestroyed() &&
+  e.sender === find.view.webContents;
+ipcMain.on("find:query", (e, text) => {
+  if (fromFind(e)) findRun(String(text ?? "").slice(0, 200), true);
+});
+ipcMain.on("find:step", (e, forward) => {
+  if (fromFind(e)) findRun(find.text, !!forward);
+});
+ipcMain.on("find:close", (e) => {
+  if (fromFind(e)) findClose();
+});
+
 onUI("suggest:query", (text, rect, force) => sgQuery(text, rect, force));
 onUI("suggest:move", (dir) => sgMove(Number(dir) > 0 ? 1 : -1));
 onUI("suggest:focus", () => {
@@ -1898,7 +2561,11 @@ handleUI("adblock:toggle", () => {
   if (!blocker) return adblockState();
   adblockOn = !adblockOn;
   if (adblockOn) enableBlocking();
-  else blocker.disableBlockingInSession(session.defaultSession);
+  else {
+    try {
+      blocker.disableBlockingInSession(session.defaultSession);
+    } catch {}
+  }
   return adblockState();
 });
 
@@ -1928,6 +2595,194 @@ handleInternal("syptek:bookmarks:remove", (url) => {
 });
 
 // ---------------------------------------------------------------
+// ---------------------------------------------------------------
+// Halaman Settings (syptek://settings): bersihkan cache, batas cache web, dan DNS.
+// Pilihan disimpan di userData/settings.json dan menimpa config.json (yang ada di folder
+// aplikasi dan bisa read-only setelah dipasang). Semua handler hanya melayani halaman internal.
+// ---------------------------------------------------------------
+const CLEAR = {
+  http: {
+    dirs: ["Cache"],
+    run: (ses) => ses.clearCache(),
+  },
+  code: {
+    dirs: [
+      "Code Cache",
+      "GPUCache",
+      "DawnGraphiteCache",
+      "DawnWebGPUCache",
+      "DawnCache",
+      "GrShaderCache",
+      "ShaderCache",
+    ],
+    run: async (ses) => {
+      await ses.clearCodeCaches({ urls: [] });
+      await ses.clearStorageData({ storages: ["shadercache"] });
+    },
+  },
+  offline: {
+    dirs: ["Service Worker/CacheStorage"],
+    run: (ses) => ses.clearStorageData({ storages: ["cachestorage"] }),
+  },
+  adblock: {
+    files: /^adblock-.*\.bin$/,
+    // Cache engine ad blocker dibuat ulang saat Syptek dibuka lagi
+    run: async () => {
+      const dir = app.getPath("userData");
+      for (const f of await fs.promises.readdir(dir).catch(() => []))
+        if (CLEAR.adblock.files.test(f))
+          await fs.promises.unlink(path.join(dir, f)).catch(() => {});
+    },
+  },
+  // Di bawah ini menyentuh akun: selalu minta konfirmasi dari proses utama
+  cookies: {
+    danger: true,
+    button: "Clear cookies",
+    message: "Clear all cookies and logins?",
+    detail:
+      "You will be signed out of every website (Instagram, X, Google, and so on). " +
+      "Syptek does not store passwords itself, so you will need to sign in again.",
+    run: (ses) => ses.clearStorageData({ storages: ["cookies"] }),
+  },
+  sitedata: {
+    danger: true,
+    dirs: ["Local Storage", "IndexedDB", "Session Storage", "File System"],
+    button: "Clear site data",
+    message: "Clear all site data?",
+    detail:
+      "This removes local storage, IndexedDB and registered service workers. You may be signed out, " +
+      "and web apps can lose offline data, unsent drafts and their saved settings.",
+    run: (ses) =>
+      ses.clearStorageData({
+        storages: [
+          "localstorage",
+          "indexdb",
+          "websql",
+          "filesystem",
+          "serviceworkers",
+        ],
+      }),
+  },
+};
+
+async function dirSize(p) {
+  let entries;
+  try {
+    entries = await fs.promises.readdir(p, { withFileTypes: true });
+  } catch {
+    return 0;
+  }
+  const sizes = await Promise.all(
+    entries.map(async (e) => {
+      const f = path.join(p, e.name);
+      if (e.isDirectory()) return dirSize(f);
+      if (!e.isFile()) return 0;
+      try {
+        return (await fs.promises.stat(f)).size;
+      } catch {
+        return 0;
+      }
+    }),
+  );
+  return sizes.reduce((a, b) => a + b, 0);
+}
+
+// Ukuran satu kategori (null = tidak ada ukuran yang bisa dihitung, mis. cookie)
+async function clearSize(c) {
+  const base = app.getPath("userData");
+  if (!c.dirs && !c.files) return null;
+  let n = 0;
+  for (const d of c.dirs || []) n += await dirSize(path.join(base, d));
+  if (c.files) {
+    for (const f of await fs.promises.readdir(base).catch(() => [])) {
+      if (!c.files.test(f)) continue;
+      try {
+        n += (await fs.promises.stat(path.join(base, f))).size;
+      } catch {}
+    }
+  }
+  return n;
+}
+
+handleInternal("syptek:settings:get", () => ({
+  dns: { mode: config.dns.mode, servers: config.dns.servers },
+  cacheLimitMB: config.cacheLimitMB | 0,
+  dataDir: app.getPath("userData"),
+}));
+
+handleInternal("syptek:settings:dns", (mode, servers) => {
+  if (!DNS_MODES.includes(mode))
+    return { ok: false, error: "Invalid DNS mode." };
+  if (
+    !Array.isArray(servers) ||
+    servers.length < 1 ||
+    servers.length > 5 ||
+    !servers.every(isDohUrl)
+  )
+    return { ok: false, error: "A DNS server must be an https:// address." };
+  try {
+    writeSettings({ dnsMode: mode, dnsServers: servers });
+  } catch (err) {
+    return { ok: false, error: "Could not save: " + err.message };
+  }
+  config.dns.mode = mode;
+  config.dns.servers = servers;
+  setupDns();
+  session.defaultSession.clearHostResolverCache().catch(() => {}); // lookup berikutnya memakai pengaturan baru
+  return { ok: true };
+});
+
+handleInternal("syptek:settings:cacheLimit", (mb) => {
+  if (!CACHE_LIMITS.includes(mb)) return { ok: false, error: "Invalid value." };
+  try {
+    writeSettings({ cacheLimitMB: mb });
+  } catch (err) {
+    return { ok: false, error: "Could not save: " + err.message };
+  }
+  return { ok: true, restart: mb !== (cacheLimitAtStart | 0) };
+});
+
+handleInternal("syptek:cache:sizes", async () => {
+  const out = {};
+  for (const [id, c] of Object.entries(CLEAR)) out[id] = await clearSize(c);
+  out.total = await dirSize(app.getPath("userData"));
+  return out;
+});
+
+handleInternal("syptek:cache:clear", async (id) => {
+  const c =
+    typeof id === "string" && Object.hasOwn(CLEAR, id) ? CLEAR[id] : null;
+  if (!c) return { ok: false, error: "Unknown item." };
+  if (c.danger) {
+    const opts = {
+      type: "warning",
+      title: "Syptek",
+      message: c.message,
+      detail: c.detail,
+      buttons: ["Cancel", c.button],
+      defaultId: 0,
+      cancelId: 0,
+      noLink: true,
+    };
+    const { response } =
+      win && !win.isDestroyed()
+        ? await dialog.showMessageBox(win, opts)
+        : await dialog.showMessageBox(opts);
+    if (response !== 1) return { ok: false, cancelled: true };
+  }
+  const before = await clearSize(c);
+  try {
+    await c.run(session.defaultSession);
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+  const after = await clearSize(c);
+  return {
+    ok: true,
+    freed: before != null && after != null ? Math.max(0, before - after) : null,
+  };
+});
+
 // Halaman Tentang (syptek://about) & Kredit (syptek://credits)
 // Daftar kredit dibaca dari package.json + node_modules saat halamannya dibuka
 // (tidak ada daftar yang ditulis tangan, jadi selalu ikut dependensi yang dipakai).

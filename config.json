@@ -33,13 +33,13 @@
     "csp": false,
     "html": false,
     "popups": true,
-    "allowlist": [
-      "soundcloud.com"
-    ],
-    "debug": false
+    "allowlist": ["soundcloud.com"],
+    "debug": false,
+    "neverBlock": [],
+    "scriptlets": true
   },
   "dns": {
-    "mode": "automatic",
+    "mode": "secure",
     "servers": [
       "https://cloudflare-dns.com/dns-query",
       "https://dns.google/dns-query",
@@ -52,6 +52,11 @@
   },
   "tabSuspend": {
     "enabled": true,
-    "afterMinutes": 5
+    "afterMinutes": 5,
+    "neverSuspend": ["web.whatsapp.com", "meet.google.com"],
+    "lowMemory": {
+      "freePercent": 15,
+      "afterMinutes": 1
+    }
   }
 }

@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<title>Find</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: #1c1c22; overflow: hidden; }
+  body {
+    display: flex; align-items: center; gap: 6px; padding: 0 8px;
+    font: 13px system-ui, -apple-system, "Segoe UI", sans-serif; color: #e8e8ee;
+    user-select: none;
+  }
+  input {
+    flex: 1; min-width: 0; height: 28px; padding: 0 8px;
+    background: #141418; color: inherit; border: 1px solid #2c2c35; border-radius: 7px;
+    font: inherit; outline: none; user-select: text;
+  }
+  input:focus { border-color: #5b8def; }
+  #count { min-width: 44px; text-align: right; color: #a8a8b3; font-variant-numeric: tabular-nums; }
+  #count.none { color: #e5706b; }
+  button {
+    width: 26px; height: 26px; padding: 0; border: 0; border-radius: 6px;
+    background: transparent; color: #a8a8b3; font-size: 12px; cursor: pointer;
+  }
+  button:hover { background: #2a2a33; color: #e8e8ee; }
+</style>
+</head>
+<body>
+  <input id="q" type="text" placeholder="Find in page" spellcheck="false" autocomplete="off" aria-label="Find in page">
+  <span id="count"></span>
+  <button id="prev" tabindex="-1" title="Previous (Shift+Enter)" aria-label="Previous match">&#9650;</button>
+  <button id="next" tabindex="-1" title="Next (Enter)" aria-label="Next match">&#9660;</button>
+  <button id="close" tabindex="-1" title="Close (Esc)" aria-label="Close">&#10005;</button>
+<script>
+  const q = document.getElementById('q');
+  const count = document.getElementById('count');
+
+  function show(r) {
+    if (!q.value) { count.textContent = ''; count.className = ''; return; }
+    count.textContent = r.ord + '/' + r.total;
+    count.className = r.total ? '' : 'none';
+  }
+
+  findAPI.onShow(({ text }) => {
+    q.value = text || '';
+    count.textContent = '';
+    count.className = '';
+    q.focus();
+    q.select();
+  });
+  findAPI.onResult(show);
+
+  q.addEventListener('input', () => findAPI.query(q.value));
+  q.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); if (q.value) findAPI.step(!e.shiftKey); }
+    else if (e.key === 'Escape') { e.preventDefault(); findAPI.close(); }
+  });
+  // mousedown + preventDefault: klik tombol tidak mencuri fokus dari kotak cari
+  for (const [id, fn] of [['prev', () => findAPI.step(false)], ['next', () => findAPI.step(true)], ['close', () => findAPI.close()]]) {
+    const b = document.getElementById(id);
+    b.addEventListener('mousedown', (e) => e.preventDefault());
+    b.addEventListener('click', () => { if (id === 'close' || q.value) fn(); q.focus(); });
+  }
+</script>
+</body>
+</html>
