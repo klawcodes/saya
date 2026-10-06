@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="color-scheme" content="dark">
+  <title>Failed to load page</title>
+  <style>
+    html, body { height: 100%; margin: 0; background: #141418; color: #e4e4ea; }
+    body { display: grid; place-items: center; font: 14px "Segoe UI", system-ui, sans-serif; }
+    main { max-width: 480px; padding: 24px; text-align: center; }
+    h1 { font-size: 18px; font-weight: 600; margin: 0 0 10px; }
+    p { color: #a8a8b3; line-height: 1.5; margin: 6px 0; word-break: break-all; }
+    code { color: #7c8cff; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>This page can't be opened</h1>
+    <p id="url"></p>
+    <p>Cause: <code id="err"></code></p>
+    <p>Check your internet connection or the address, then press F5 to try again.</p>
+  </main>
+  <script>
+    const q = new URLSearchParams(location.search);
+    document.getElementById('url').textContent = q.get('u') || '';
+    document.getElementById('err').textContent = q.get('e') || 'unknown';
+  </script>
+</body>
+</html>

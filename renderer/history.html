@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; script-src 'self'">
+  <title>History</title>
+  <link rel="stylesheet" href="page.css">
+</head>
+<body>
+  <main>
+    <header>
+      <h1>History</h1>
+      <div class="tools">
+        <select id="range" aria-label="Range to clear">
+          <option value="hour">Last hour</option>
+          <option value="today">Today</option>
+          <option value="all">All history</option>
+        </select>
+        <button id="clear" class="act" type="button">Clear</button>
+      </div>
+    </header>
+    <input id="q" type="search" placeholder="Search by title or address" autocomplete="off" spellcheck="false">
+    <div id="list"></div>
+    <button id="more" class="act" type="button" hidden>Load more</button>
+  </main>
+  <script src="history.js"></script>
+</body>
+</html>

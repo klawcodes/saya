@@ -1,0 +1,57 @@
+{
+  "searchEngine": "duckduckgo",
+  "searchEngines": [
+    {
+      "id": "google",
+      "name": "Google",
+      "url": "https://www.google.com/search?q=%s",
+      "suggest": "https://suggestqueries.google.com/complete/search?client=firefox&q=%s"
+    },
+    {
+      "id": "duckduckgo",
+      "name": "DuckDuckGo",
+      "url": "https://duckduckgo.com/?q=%s",
+      "suggest": "https://duckduckgo.com/ac/?type=list&q=%s"
+    },
+    {
+      "id": "brave",
+      "name": "Brave Search",
+      "url": "https://search.brave.com/search?q=%s",
+      "suggest": "https://search.brave.com/api/suggest?q=%s"
+    }
+  ],
+  "suggestions": {
+    "enabled": true,
+    "remote": true
+  },
+  "hardwareAcceleration": true,
+  "restoreTabs": true,
+  "adblock": {
+    "enabled": true,
+    "level": "ublock",
+    "cosmetic": true,
+    "csp": false,
+    "html": false,
+    "popups": true,
+    "allowlist": [
+      "soundcloud.com"
+    ],
+    "debug": false
+  },
+  "dns": {
+    "mode": "automatic",
+    "servers": [
+      "https://cloudflare-dns.com/dns-query",
+      "https://dns.google/dns-query",
+      "https://dns.quad9.net/dns-query"
+    ]
+  },
+  "history": {
+    "enabled": true,
+    "maxEntries": 5000
+  },
+  "tabSuspend": {
+    "enabled": true,
+    "afterMinutes": 5
+  }
+}
