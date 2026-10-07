@@ -264,8 +264,7 @@ try {
 } catch (e) {
   console.warn("[saya] migrasi data lama dilewati:", e.message);
 }
-if (process.platform === "win32") app.setAppUserModelId("Saya"); // ikon & pengelompokan taskbar
-
+if (process.platform === "win32") app.setAppUserModelId("com.saya.browser");
 // Hanya satu Saya yang berjalan; link/perintah dari instance kedua dibuka sebagai tab baru
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) app.quit();
@@ -1594,7 +1593,8 @@ function fmtAgo(ts) {
   if (m < 1) return "Just now";
   if (m < 60) return `${Math.floor(m)} min ago`;
   const h = m / 60;
-  if (h < 24) return `${Math.floor(h)} hour${Math.floor(h) === 1 ? "" : "s"} ago`;
+  if (h < 24)
+    return `${Math.floor(h)} hour${Math.floor(h) === 1 ? "" : "s"} ago`;
   const d = Math.floor(h / 24);
   return `${d} day${d === 1 ? "" : "s"} ago`;
 }
@@ -1628,7 +1628,16 @@ function dlHost(u) {
 // diunduh (sebelum itu filenya belum ada, jadi dipakai ikon generik ekstensinya).
 const iconCache = new Map(); // kunci -> data URL ("" = gagal -> UI memakai lencana teks)
 const iconBusy = new Set();
-const PER_FILE_ICON = new Set(["exe", "msi", "ico", "lnk", "scr", "dll", "cur", "appx"]);
+const PER_FILE_ICON = new Set([
+  "exe",
+  "msi",
+  "ico",
+  "lnk",
+  "scr",
+  "dll",
+  "cur",
+  "appx",
+]);
 
 function dlIconKey(e) {
   const ext = path.extname(e.n).slice(1).toLowerCase();
@@ -1963,7 +1972,10 @@ function dlpLayout() {
   const height = Math.max(120, Math.min(DL_HEAD + body + DL_FOOT, h - y - 8));
   const width = Math.min(DL_W, w - 16);
   // rata kanan dengan ikon, tetap di dalam jendela
-  const x = Math.max(8, Math.min(Math.round(dlp.rect.right - width + 6), w - width - 8));
+  const x = Math.max(
+    8,
+    Math.min(Math.round(dlp.rect.right - width + 6), w - width - 8),
+  );
   dlp.view.setBounds({ x, y, width, height });
 }
 
