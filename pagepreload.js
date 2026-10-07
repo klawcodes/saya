@@ -60,7 +60,7 @@ function googleShim() {
   }
 
   // Chrome asli: Notification.permission dan permissions.query('notifications') sama-sama "default"/"prompt".
-  // Syptek selalu menolak notifikasi, jadi keduanya tidak konsisten (ciri browser tanpa UI).
+  // Saya selalu menolak notifikasi, jadi keduanya tidak konsisten (ciri browser tanpa UI).
   if (window.Notification && Notification.permission === "denied")
     def(Notification, "permission", () => "default");
   if (navigator.permissions && navigator.permissions.query) {
@@ -70,11 +70,21 @@ function googleShim() {
         ? Promise.resolve({ state: "prompt", onchange: null })
         : q(d);
   }
+
+  // FedCM (login Google One Tap / tombol "Continue with Google") butuh UI pemilih akun milik browser,
+  // yang tidak ada di Electron: navigator.credentials.get({identity}) selalu ditolak dan script Google
+  // hanya mencatat "Prompt dismissed". Script Google memeriksa window.IdentityCredential; kalau tidak ada,
+  // ia memakai jalur lama (popup / iframe) yang bisa berjalan di sini.
+  try {
+    delete window.IdentityCredential;
+    delete window.IdentityProvider;
+    delete window.NavigatorLogin;
+  } catch {}
 }
 
 let shimAll = false;
 try {
-  shimAll = (process.argv || []).includes("--syptek-shim=all");
+  shimAll = (process.argv || []).includes("--saya-shim=all");
 } catch {}
 
 if (
@@ -84,7 +94,7 @@ if (
   try {
     contextBridge.executeInMainWorld({ func: googleShim });
   } catch (err) {
-    console.warn("[syptek] shim gagal:", err && err.message);
+    console.warn("[saya] shim gagal:", err && err.message);
   }
 }
 
@@ -93,7 +103,7 @@ if (
 // webFrame.executeJavaScript tidak terikat CSP halaman. Halaman pengecualian (login dsb.) mendapat daftar kosong.
 if (/^https?:$/.test(location.protocol)) {
   try {
-    const scripts = ipcRenderer.sendSync("syptek:scriptlets");
+    const scripts = ipcRenderer.sendSync("saya:scriptlets");
     if (Array.isArray(scripts)) {
       for (const code of scripts)
         webFrame.executeJavaScript(code).catch(() => {});
@@ -104,21 +114,26 @@ if (/^https?:$/.test(location.protocol)) {
 if (location.protocol === "file:") {
   const call = (channel, ...args) => ipcRenderer.invoke(channel, ...args);
   const api = {
-    historyList: (opts) => call("syptek:history:list", opts),
-    historyRemove: (url) => call("syptek:history:remove", url),
-    historyClear: (since) => call("syptek:history:clear", since),
-    bookmarksList: () => call("syptek:bookmarks:list"),
-    bookmarksRemove: (url) => call("syptek:bookmarks:remove", url),
-    aboutInfo: () => call("syptek:about:info"),
-    creditsList: () => call("syptek:credits:list"),
-    creditsLicense: (id) => call("syptek:credits:license", id),
-    open: (name) => call("syptek:open", name),
-    settingsGet: () => call("syptek:settings:get"),
-    settingsDns: (mode, servers) => call("syptek:settings:dns", mode, servers),
-    settingsCacheLimit: (mb) => call("syptek:settings:cacheLimit", mb),
-    cacheSizes: () => call("syptek:cache:sizes"),
-    cacheClear: (id) => call("syptek:cache:clear", id),
+    historyList: (opts) => call("saya:history:list", opts),
+    historyRemove: (url) => call("saya:history:remove", url),
+    historyClear: (since) => call("saya:history:clear", since),
+    bookmarksList: () => call("saya:bookmarks:list"),
+    bookmarksRemove: (url) => call("saya:bookmarks:remove", url),
+    aboutInfo: () => call("saya:about:info"),
+    creditsList: () => call("saya:credits:list"),
+    creditsLicense: (id) => call("saya:credits:license", id),
+    downloadsList: () => call("saya:downloads:list"),
+    downloadsAct: (id, action) => call("saya:downloads:act", id, action),
+    downloadsClear: () => call("saya:downloads:clear"),
+    downloadsOnUpdate: (cb) =>
+      ipcRenderer.on("saya:downloads:update", (_e, items) => cb(items)),
+    open: (name) => call("saya:open", name),
+    settingsGet: () => call("saya:settings:get"),
+    settingsDns: (mode, servers) => call("saya:settings:dns", mode, servers),
+    settingsCacheLimit: (mb) => call("saya:settings:cacheLimit", mb),
+    cacheSizes: () => call("saya:cache:sizes"),
+    cacheClear: (id) => call("saya:cache:clear", id),
   };
-  contextBridge.exposeInMainWorld("syptekAPI", api);
+  contextBridge.exposeInMainWorld("sayaAPI", api);
   contextBridge.exposeInMainWorld("siftAPI", api); // alias sementara untuk halaman internal lama (history, bookmarks, dst.)
 }

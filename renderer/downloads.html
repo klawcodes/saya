@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; img-src 'self' data:; style-src 'self'; script-src 'self'"
+    />
+    <title>Downloads</title>
+    <link rel="stylesheet" href="page.css" />
+    <link rel="stylesheet" href="dlrow.css" />
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>Downloads<small id="count"></small></h1>
+        <div class="tools">
+          <button class="act" id="folder">Open folder</button>
+          <button class="act" id="clear" title="Removes the list only; files stay on disk">Clear history</button>
+        </div>
+      </header>
+      <input id="q" type="text" placeholder="Search downloads" autocomplete="off" spellcheck="false" />
+      <div id="list"></div>
+      <p class="empty" id="empty" hidden></p>
+    </main>
+    <script src="dlrow.js"></script>
+    <script src="downloads.js"></script>
+  </body>
+</html>

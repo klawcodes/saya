@@ -1,68 +1,102 @@
 <!doctype html>
 <html lang="en">
-<head>
-<meta charset="utf-8">
-<title>Settings</title>
-<link rel="stylesheet" href="settings.css">
-</head>
-<body>
-<main>
-  <h1>Settings</h1>
+  <head>
+    <meta charset="utf-8" />
+    <title>Settings</title>
+    <link rel="stylesheet" href="settings.css" />
+  </head>
+  <body>
+    <main>
+      <h1>Settings</h1>
 
-  <section>
-    <h2>Disk &amp; cache</h2>
-    <p class="lead">Syptek's data folder uses <b id="total">…</b>.
-      <span class="mono" id="dir"></span></p>
+      <section>
+        <h2>Disk &amp; cache</h2>
+        <p class="lead">
+          Saya's data folder uses <b id="total">…</b>.
+          <span class="mono" id="dir"></span>
+        </p>
 
-    <h3>Safe to clear</h3>
-    <p class="hint">Rebuilt automatically as you browse. These clear right away, without asking.</p>
-    <ul class="rows" id="safe"></ul>
+        <h3>Safe to clear</h3>
+        <p class="hint">
+          Rebuilt automatically as you browse. These clear right away, without
+          asking.
+        </p>
+        <ul class="rows" id="safe"></ul>
 
-    <h3 class="warn">Affects your accounts</h3>
-    <p class="hint">These can sign you out or delete data kept by websites. Syptek always asks first.</p>
-    <ul class="rows" id="risky"></ul>
+        <h3 class="warn">Affects your accounts</h3>
+        <p class="hint">
+          These can sign you out or delete data kept by websites. Saya always
+          asks first.
+        </p>
+        <ul class="rows" id="risky"></ul>
 
-    <p class="hint">History and bookmarks are not touched here. Manage them in
-      <a href="#" id="open-history">History</a>.</p>
+        <p class="hint">
+          History and bookmarks are not touched here. Manage them in
+          <a href="#" id="open-history">History</a>.
+        </p>
 
-    <h3>Limit the web cache</h3>
-    <p class="hint">Caps how much disk the saved copies of pages and images can use. Chromium treats this as a
-      target, so it can go slightly over. Takes effect after you restart Syptek.</p>
-    <div class="line">
-      <select id="limit" aria-label="Web cache limit">
-        <option value="0">Automatic (Chromium default)</option>
-        <option value="50">50 MB</option>
-        <option value="100">100 MB</option>
-        <option value="250">250 MB</option>
-        <option value="500">500 MB</option>
-      </select>
-      <span class="status" id="limit-status"></span>
-    </div>
-  </section>
+        <h3>Limit the web cache</h3>
+        <p class="hint">
+          Caps how much disk the saved copies of pages and images can use.
+          Chromium treats this as a target, so it can go slightly over. Takes
+          effect after you restart Saya.
+        </p>
+        <div class="line">
+          <select id="limit" aria-label="Web cache limit">
+            <option value="0">Automatic (Chromium default)</option>
+            <option value="50">50 MB</option>
+            <option value="100">100 MB</option>
+            <option value="250">250 MB</option>
+            <option value="500">500 MB</option>
+          </select>
+          <span class="status" id="limit-status"></span>
+        </div>
+      </section>
 
-  <section>
-    <h2>DNS</h2>
-    <p class="hint">DNS turns a site name into an address. Choose how Syptek looks them up. This does not
-      affect this page, so you can always come back and fix a bad setting.</p>
+      <section>
+        <h2>DNS</h2>
+        <p class="hint">
+          DNS turns a site name into an address. Choose how Saya looks them up.
+          This does not affect this page, so you can always come back and fix a
+          bad setting.
+        </p>
 
-    <h3>Mode</h3>
-    <div class="cards" id="modes" role="radiogroup" aria-label="DNS mode"></div>
+        <h3>Mode</h3>
+        <div
+          class="cards"
+          id="modes"
+          role="radiogroup"
+          aria-label="DNS mode"
+        ></div>
 
-    <h3>Provider</h3>
-    <p class="hint" id="provider-hint">The provider you choose can see which site names you look up, but not
-      the pages you read.</p>
-    <div class="cards" id="providers" role="radiogroup" aria-label="DNS provider"></div>
-    <div class="line" id="custom-line" hidden>
-      <input id="custom" type="text" spellcheck="false" autocomplete="off"
-             placeholder="https://dns.example.com/dns-query" aria-label="Custom DNS-over-HTTPS address">
-    </div>
+        <h3>Provider</h3>
+        <p class="hint" id="provider-hint">
+          The provider you choose can see which site names you look up, but not
+          the pages you read.
+        </p>
+        <div
+          class="cards"
+          id="providers"
+          role="radiogroup"
+          aria-label="DNS provider"
+        ></div>
+        <div class="line" id="custom-line" hidden>
+          <input
+            id="custom"
+            type="text"
+            spellcheck="false"
+            autocomplete="off"
+            placeholder="https://dns.example.com/dns-query"
+            aria-label="Custom DNS-over-HTTPS address"
+          />
+        </div>
 
-    <div class="line">
-      <button id="apply" class="primary">Apply</button>
-      <span class="status" id="dns-status"></span>
-    </div>
-  </section>
-</main>
-<script src="settings.js"></script>
-</body>
+        <div class="line">
+          <button id="apply" class="primary">Apply</button>
+          <span class="status" id="dns-status"></span>
+        </div>
+      </section>
+    </main>
+    <script src="settings.js"></script>
+  </body>
 </html>

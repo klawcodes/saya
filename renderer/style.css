@@ -25,8 +25,8 @@
   --ico: 16px;
   --addr-w: min(
     377px,
-    calc(100% - 256px)
-  ); /* sisakan 2 x 120px untuk tombol kiri/kanan */
+    calc(100% - 288px)
+  ); /* sisakan 2 x 144px untuk tombol kiri/kanan */
 
   --bg: #141418; /* bingkai & tab bar */
   --bg-tab: #1c1c22; /* toolbar & tab aktif */
@@ -59,6 +59,14 @@ body {
 }
 
 /* ---------- Tab bar ---------- */
+/* Logo Saya (branding) di ujung kiri; sejajar tengah dengan tab (tinggi tab 31 -> logo 16) */
+#brand {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin: 0 var(--f8) 8px var(--f5);
+  pointer-events: none;
+}
 #tabbar {
   height: var(--tab-h);
   display: flex;
@@ -184,6 +192,29 @@ body {
   color: inherit;
   opacity: 0;
 }
+.tab .audio {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: var(--f5);
+  background: none;
+  color: inherit;
+  opacity: 0.8;
+}
+.tab .audio:empty {
+  display: none;
+}
+.tab .audio:hover {
+  background: #3a3a45;
+  opacity: 1;
+}
+.tab .audio svg {
+  width: 13px;
+  height: 13px;
+}
 .tab:hover .close,
 .tab.active .close {
   opacity: 0.8;
@@ -254,7 +285,7 @@ body {
 }
 /* Mengetik alamat: address bar melebar 377 -> 610 (1 : 1,618) */
 #toolbar:has(#address:focus) {
-  --addr-w: min(610px, calc(100% - 256px));
+  --addr-w: min(610px, calc(100% - 288px));
 }
 
 .side {
@@ -355,6 +386,41 @@ body {
 }
 #adblock.on {
   color: var(--accent);
+}
+/* Unduhan: ikon jadi aksen + bar progres tipis di bawah ikon selama mengunduh */
+#downloads {
+  position: relative;
+}
+#downloads.busy {
+  color: var(--accent);
+}
+#downloads::after {
+  content: "";
+  position: absolute;
+  left: var(--f5);
+  bottom: 2px;
+  height: 2px;
+  width: calc((100% - var(--f5) * 2) * var(--p, 0));
+  border-radius: 1px;
+  background: var(--accent);
+  opacity: 0;
+  transition: width 300ms linear;
+}
+#downloads.busy::after {
+  opacity: 1;
+}
+#downloads.busy.ind::after {
+  width: 40%;
+  transition: none;
+  animation: dl-ind 1s ease-in-out infinite alternate;
+}
+@keyframes dl-ind {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(calc(var(--ctl) * 0.6));
+  }
 }
 #adblock-count {
   font-size: 10px;

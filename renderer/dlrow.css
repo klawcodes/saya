@@ -1,0 +1,87 @@
+/* Baris unduhan: dipakai panel (dlpanel.css) dan halaman penuh (page.css).
+   Memakai variabel warna yang sama dengan keduanya. Teks selalu line-height 1.4 supaya
+   huruf berekor (g, j, p, q, y) tidak terpotong oleh overflow: hidden. */
+.dl {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  height: 56px;
+  padding: 0 8px 0 13px;
+  border-radius: 8px;
+  outline: none;
+}
+.dl:hover { background: var(--bg-hover); }
+.dl:focus-visible { box-shadow: inset 0 0 0 2px var(--accent); }
+.dl[data-s="done"]:not([data-g]) { cursor: pointer; }
+
+.dl .ic {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  background: #30303c;
+  color: #c9c9d3;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1.4;
+  letter-spacing: 0.02em;
+}
+.dl .ic.has { background: none; }
+.dl .ic img { width: 32px; height: 32px; }
+.dl .ic:not(.has)[data-k="pdf"]   { background: #4a2630; color: #ff9aa8; }
+.dl .ic:not(.has)[data-k="zip"]   { background: #4a3d22; color: #f0c36a; }
+.dl .ic:not(.has)[data-k="img"]   { background: #214233; color: #7fd9a6; }
+.dl .ic:not(.has)[data-k="media"] { background: #2c2a52; color: #a9a2ff; }
+.dl .ic:not(.has)[data-k="exe"]   { background: #3e2750; color: #d6a3ff; }
+.dl .ic:not(.has)[data-k="doc"]   { background: #22384f; color: #8cc4ff; }
+
+.dl .tx { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.dl .nm {
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--fg);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.dl .in {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--fg-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.dl[data-g] .nm { text-decoration: line-through; color: var(--fg-faint); }
+.dl[data-s="failed"] .in { color: #ff9aa8; }
+
+.dl .bar { height: 3px; margin-top: 2px; border-radius: 2px; background: var(--bg-input); overflow: hidden; }
+.dl .bar i { display: block; width: 0; height: 100%; border-radius: 2px; background: var(--accent); transition: width 300ms linear; }
+.dl[data-s="paused"] .bar i { background: var(--fg-faint); }
+.dl .bar.ind i { width: 35%; transition: none; animation: dl-slide 1.1s ease-in-out infinite alternate; }
+@keyframes dl-slide { to { transform: translateX(185%); } }
+
+.dl .ac { flex: none; display: flex; gap: 3px; }
+.dl .ac button {
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  color: var(--fg-dim);
+}
+.dl .ac button:hover { background: #3a3a45; color: var(--fg); }
+.dl .ac button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.dl .ac svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
+.dl .ac svg.f { fill: currentColor; stroke: none; }
+/* Unduhan selesai/gagal: tombol hanya muncul saat disorot (yang berjalan selalu terlihat) */
+.dl[data-s="done"] .ac, .dl[data-s="cancelled"] .ac, .dl[data-s="failed"] .ac { opacity: 0; }
+.dl:hover .ac, .dl:focus-within .ac { opacity: 1; }
+
+button.act:disabled { opacity: 0.4; pointer-events: none; }
+[hidden] { display: none !important; }

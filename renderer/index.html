@@ -1,55 +1,103 @@
 <!doctype html>
 <html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self' data: http: https:; style-src 'self'; script-src 'self'">
-  <title>Syptek</title>
-  <link rel="stylesheet" href="style.css">
-</head>
-<body>
-  <header id="tabbar">
-    <div id="tabs"></div>
-    <button id="new-tab" class="icon-btn" title="New tab (Ctrl+T)">
-      <svg viewBox="0 0 16 16"><path d="M8 3v10M3 8h10"/></svg>
-    </button>
-    <div id="drag"></div>
-  </header>
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; img-src 'self' data: http: https:; style-src 'self'; script-src 'self'"
+    />
+    <title>Saya</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header id="tabbar">
+      <img id="brand" alt="" draggable="false" hidden />
+      <div id="tabs"></div>
+      <button id="new-tab" class="icon-btn" title="New tab (Ctrl+T)">
+        <svg viewBox="0 0 16 16"><path d="M8 3v10M3 8h10" /></svg>
+      </button>
+      <div id="drag"></div>
+    </header>
 
-  <nav id="toolbar">
-    <div class="side left">
-      <button id="back" class="icon-btn" title="Back (Alt+Left)" disabled>
-        <svg viewBox="0 0 16 16"><path d="M10 3L5 8l5 5"/></svg>
-      </button>
-      <button id="forward" class="icon-btn" title="Forward (Alt+Right)" disabled>
-        <svg viewBox="0 0 16 16"><path d="M6 3l5 5-5 5"/></svg>
-      </button>
-      <button id="reload" class="icon-btn" title="Reload (F5)">
-        <svg viewBox="0 0 16 16"><path d="M11.5 4.5A5 5 0 1 0 13 8"/><path d="M12.5 1.8v3.2H9.3"/></svg>
-      </button>
-    </div>
+    <nav id="toolbar">
+      <div class="side left">
+        <button id="back" class="icon-btn" title="Back (Alt+Left)" disabled>
+          <svg viewBox="0 0 16 16"><path d="M10 3L5 8l5 5" /></svg>
+        </button>
+        <button
+          id="forward"
+          class="icon-btn"
+          title="Forward (Alt+Right)"
+          disabled
+        >
+          <svg viewBox="0 0 16 16"><path d="M6 3l5 5-5 5" /></svg>
+        </button>
+        <button id="reload" class="icon-btn" title="Reload (F5)">
+          <svg viewBox="0 0 16 16">
+            <path d="M11.5 4.5A5 5 0 1 0 13 8" />
+            <path d="M12.5 1.8v3.2H9.3" />
+          </svg>
+        </button>
+      </div>
 
-    <div id="addrbox">
-      <button id="site" class="icon-btn" title="Site info &amp; permissions" disabled>
-        <svg viewBox="0 0 16 16"><path d="M2.5 5h6M11.5 5h2M2.5 11h2M7.5 11h6"/><circle cx="10" cy="5" r="1.5"/><circle cx="6" cy="11" r="1.5"/></svg>
-      </button>
-      <input id="address" type="text" spellcheck="false" autocomplete="off"
-             placeholder="Search or type an address">
-    </div>
+      <div id="addrbox">
+        <button
+          id="site"
+          class="icon-btn"
+          title="Site info &amp; permissions"
+          disabled
+        >
+          <svg viewBox="0 0 16 16">
+            <path d="M2.5 5h6M11.5 5h2M2.5 11h2M7.5 11h6" />
+            <circle cx="10" cy="5" r="1.5" />
+            <circle cx="6" cy="11" r="1.5" />
+          </svg>
+        </button>
+        <input
+          id="address"
+          type="text"
+          spellcheck="false"
+          autocomplete="off"
+          placeholder="Search or type an address"
+        />
+      </div>
 
-    <div class="side right">
-      <button id="star" class="icon-btn" title="Add bookmark (Ctrl+D)" disabled>
-        <svg viewBox="0 0 16 16"><path d="M8 1.9l1.9 3.8 4.2.6-3 3 .7 4.2L8 11.5l-3.8 2 .7-4.2-3-3 4.2-.6z"/></svg>
-      </button>
-      <button id="adblock" class="icon-btn wide" title="Ad blocker" disabled>
-        <svg viewBox="0 0 16 16"><path d="M8 1.8l5 1.8v4c0 3-2.1 5.2-5 6.4-2.9-1.2-5-3.4-5-6.4v-4z"/></svg>
-        <span id="adblock-count"></span>
-      </button>
-      <button id="menu" class="icon-btn" title="Menu">
-        <svg viewBox="0 0 16 16" class="dots"><circle cx="3.5" cy="8" r="1.1"/><circle cx="8" cy="8" r="1.1"/><circle cx="12.5" cy="8" r="1.1"/></svg>
-      </button>
-    </div>
-  </nav>
+      <div class="side right">
+        <button
+          id="star"
+          class="icon-btn"
+          title="Add bookmark (Ctrl+D)"
+          disabled
+        >
+          <svg viewBox="0 0 16 16">
+            <path
+              d="M8 1.9l1.9 3.8 4.2.6-3 3 .7 4.2L8 11.5l-3.8 2 .7-4.2-3-3 4.2-.6z"
+            />
+          </svg>
+        </button>
+        <button id="adblock" class="icon-btn wide" title="Ad blocker" disabled>
+          <svg viewBox="0 0 16 16">
+            <path
+              d="M8 1.8l5 1.8v4c0 3-2.1 5.2-5 6.4-2.9-1.2-5-3.4-5-6.4v-4z"
+            />
+          </svg>
+          <span id="adblock-count"></span>
+        </button>
+        <button id="downloads" class="icon-btn" title="Downloads (Ctrl+J)">
+          <svg viewBox="0 0 16 16">
+            <path d="M8 2.5v7M5 6.8l3 3 3-3M3 12.5h10" />
+          </svg>
+        </button>
+        <button id="menu" class="icon-btn" title="Menu">
+          <svg viewBox="0 0 16 16" class="dots">
+            <circle cx="3.5" cy="8" r="1.1" />
+            <circle cx="8" cy="8" r="1.1" />
+            <circle cx="12.5" cy="8" r="1.1" />
+          </svg>
+        </button>
+      </div>
+    </nav>
 
-  <script src="renderer.js"></script>
-</body>
+    <script src="renderer.js"></script>
+  </body>
 </html>

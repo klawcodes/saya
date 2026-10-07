@@ -10,6 +10,7 @@ const {
   dialog,
   shell,
   clipboard,
+  nativeImage,
   screen,
   net,
 } = require("electron");
@@ -34,6 +35,7 @@ const fileUrl = (name) => pathToFileURL(path.join(RENDERER_DIR, name)).href;
 const NEWTAB_URL = fileUrl("newtab.html");
 const ERROR_URL = fileUrl("error.html");
 const PAGES = {
+  downloads: fileUrl("downloads.html"),
   history: fileUrl("history.html"),
   bookmarks: fileUrl("bookmarks.html"),
   about: fileUrl("about.html"),
@@ -93,7 +95,7 @@ const DEFAULT_CONFIG = {
     clientHints: true, // UA + Client Hints ala Chrome lewat CDP (false = pakai bawaan Electron; untuk uji coba login Google)
   },
   hardwareAcceleration: true,
-  restoreTabs: true, // buka kembali tab terakhir saat Syptek dijalankan
+  restoreTabs: true, // buka kembali tab terakhir saat Saya dijalankan
   adblock: {
     enabled: true,
     level: "ublock", // 'ublock' (daftar di "lists", setara uBlock Origin) | 'ads' | 'adsAndTracking' (daftar bawaan Ghostery)
@@ -208,7 +210,7 @@ function writeSettings(patch) {
   if (CACHE_LIMITS.includes(s.cacheLimitMB))
     config.cacheLimitMB = s.cacheLimitMB;
 }
-const cacheLimitAtStart = config.cacheLimitMB | 0; // perubahan batas baru berlaku setelah Syptek dibuka ulang
+const cacheLimitAtStart = config.cacheLimitMB | 0; // perubahan batas baru berlaku setelah Saya dibuka ulang
 if (cacheLimitAtStart > 0)
   app.commandLine.appendSwitch(
     "disk-cache-size",
@@ -242,7 +244,7 @@ app.commandLine.appendSwitch(
 );
 app.commandLine.appendSwitch("disable-blink-features", "AutomationControlled"); // navigator.webdriver tetap false
 
-// Pindahkan data lama (riwayat, bookmark, sesi, izin, login) dari folder "Sift" ke "Syptek", sekali saja
+// Pindahkan data lama (riwayat, bookmark, sesi, izin, login) dari folder "Sift" ke "Saya", sekali saja
 try {
   const oldDir = path.join(app.getPath("appData"), "Sift");
   const newDir = app.getPath("userData");
@@ -260,11 +262,11 @@ try {
     });
   }
 } catch (e) {
-  console.warn("[syptek] migrasi data lama dilewati:", e.message);
+  console.warn("[saya] migrasi data lama dilewati:", e.message);
 }
-if (process.platform === "win32") app.setAppUserModelId("Syptek"); // ikon & pengelompokan taskbar
+if (process.platform === "win32") app.setAppUserModelId("Saya"); // ikon & pengelompokan taskbar
 
-// Hanya satu Syptek yang berjalan; link/perintah dari instance kedua dibuka sebagai tab baru
+// Hanya satu Saya yang berjalan; link/perintah dari instance kedua dibuka sebagai tab baru
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) app.quit();
 const urlFromArgs = (argv) =>
@@ -312,7 +314,7 @@ function toUrl(input) {
   const text = String(input || "").trim();
   if (!text) return NEWTAB_URL;
   const internal =
-    /^(?:syptek|sift):\/\/(history|bookmarks|about|credits|settings)\/?$/i.exec(
+    /^(?:saya|sift):\/\/(history|bookmarks|downloads|about|credits|settings)\/?$/i.exec(
       text,
     );
   if (internal) return PAGES[internal[1].toLowerCase()];
@@ -369,7 +371,7 @@ function tabState(tab) {
     const wc = tab.view.webContents;
     let url = wc.getURL();
     if (url === NEWTAB_URL) url = "";
-    else if (PAGE_NAMES.has(url)) url = "syptek://" + PAGE_NAMES.get(url);
+    else if (PAGE_NAMES.has(url)) url = "saya://" + PAGE_NAMES.get(url);
     else if (url.startsWith(ERROR_URL) || url.startsWith("chrome-error://"))
       url = tab.errorUrl || "";
     s = {
@@ -385,16 +387,18 @@ function tabState(tab) {
     ...s,
     favicon: tab.favicon,
     suspended: tab.suspended,
+    audible: !tab.suspended && tab.view.webContents.isCurrentlyAudible(),
+    muted: !!tab.muted,
     bookmarkable: isWeb(s.url),
     bookmarked: stores.bookmarks.has(s.url),
   };
 }
 
-// Judul jendela = judul tab aktif ("(96) WhatsApp - Syptek"). Windows memakainya untuk preview taskbar dan Alt+Tab.
+// Judul jendela = judul tab aktif ("(96) WhatsApp - Saya"). Windows memakainya untuk preview taskbar dan Alt+Tab.
 let winTitle = "";
 function syncWindowTitle(s) {
   if (!win || win.isDestroyed()) return;
-  const t = s?.title ? `${String(s.title).slice(0, 200)} - Syptek` : "Syptek";
+  const t = s?.title ? `${String(s.title).slice(0, 200)} - Saya` : "Saya";
   if (t === winTitle) return;
   winTitle = t;
   win.setTitle(t);
@@ -505,7 +509,7 @@ function focusAddress() {
 function shimPrefs() {
   return config.identity.chromeShim === "all"
     ? {
-        additionalArguments: ["--syptek-shim=all"],
+        additionalArguments: ["--saya-shim=all"],
         nodeIntegrationInSubFrames: true,
       }
     : {};
@@ -529,6 +533,7 @@ function buildView(tab) {
   wc.setWebRTCIPHandlingPolicy("default_public_interface_only"); // cegah kebocoran IP lokal lewat WebRTC
   wc.setMaxListeners(50); // situs besar memasang banyak listener saat loading; ini hanya peringatan
   spoofUA(wc); // UA + Client Hints konsisten (lihat spoofUA)
+  wc.setAudioMuted(!!tab.muted);
   const live = () => !wc.isDestroyed() && tab.view === view;
   const push = () => {
     if (!live()) return;
@@ -550,6 +555,8 @@ function buildView(tab) {
   });
   wc.on("did-start-loading", push);
   wc.on("did-stop-loading", push);
+  wc.on("audio-state-changed", push);
+  wc.on("media-started-playing", push); // cadangan untuk versi Electron lama
   // Redirect / navigasi baru / gagal muat: segarkan status supaya spinner tidak tertinggal "berhenti"
   wc.on("did-start-navigation", (e) => e.isMainFrame && push());
   wc.on("did-redirect-navigation", (e) => e.isMainFrame && push());
@@ -613,30 +620,41 @@ function buildView(tab) {
     win.setFullScreen(false);
     layout();
   });
-  wc.setWindowOpenHandler(({ url: target, disposition, features }) => {
-    if (popupBlocked(wc, target)) return { action: "deny" };
-    // Popup sungguhan (window.open dengan ukuran, atau about:blank yang nanti diisi halaman asal),
-    // mis. login Google/Facebook/Apple. Harus jendela asli supaya window.opener & postMessage jalan.
-    if (target === "about:blank" || disposition === "new-window" || features) {
-      return {
-        action: "allow",
-        overrideBrowserWindowOptions: {
-          parent: win,
-          autoHideMenuBar: true,
-          backgroundColor: BG,
-          webPreferences: {
-            sandbox: true,
-            contextIsolation: true,
-            nodeIntegration: false,
-            preload: PAGE_PRELOAD,
-            ...shimPrefs(),
+  wc.setWindowOpenHandler(
+    ({ url: target, disposition, features, frameName }) => {
+      if (config.adblock.debug)
+        console.log("[popup]", { target, disposition, features, frameName });
+      if (popupBlocked(wc, target)) return { action: "deny" };
+      // Popup sungguhan (window.open dengan ukuran, window.open bernama, about:blank yang nanti diisi
+      // halaman asal, atau tujuan login), mis. login Google/Facebook/Apple. Harus jendela asli supaya
+      // window.opener & postMessage jalan; kalau dijadikan tab biasa, hasil login tidak kembali ke halaman asal.
+      if (
+        target === "about:blank" ||
+        disposition === "new-window" ||
+        features ||
+        frameName ||
+        isAuthTarget(target)
+      ) {
+        return {
+          action: "allow",
+          overrideBrowserWindowOptions: {
+            parent: win,
+            autoHideMenuBar: true,
+            backgroundColor: BG,
+            webPreferences: {
+              sandbox: true,
+              contextIsolation: true,
+              nodeIntegration: false,
+              preload: PAGE_PRELOAD,
+              ...shimPrefs(),
+            },
           },
-        },
-      };
-    }
-    createTab(target);
-    return { action: "deny" };
-  });
+        };
+      }
+      createTab(target);
+      return { action: "deny" };
+    },
+  );
   wc.on("did-create-window", (child) => setupPopupWindow(child));
   return view;
 }
@@ -684,6 +702,7 @@ function activateTab(id) {
   const next = tabs.get(id);
   if (!next) return;
   sgHide(); // dropdown saran akan tertutup view halaman
+  dlpHide();
   if (find.open && find.tabId !== id) findClose(false); // bar cari milik tab sebelumnya
   const prev = activeTab();
   if (prev && prev !== next) {
@@ -956,6 +975,7 @@ function toggleBookmark() {
 }
 
 function openInternal(name) {
+  dlpHide();
   const url = PAGES[name];
   for (const t of tabs.values()) {
     if (!t.suspended && t.view.webContents.getURL() === url)
@@ -964,6 +984,21 @@ function openInternal(name) {
   const wc = activeWC();
   if (wc && wc.getURL() === NEWTAB_URL) wc.loadURL(url).catch(() => {});
   else createTab(url);
+}
+
+// Logo kecil di ujung kiri tab bar (branding): icon.ico di folder proyek, diperkecil jadi PNG
+let logoCache;
+function appLogo() {
+  if (logoCache !== undefined) return logoCache;
+  logoCache = "";
+  try {
+    const img = nativeImage.createFromPath(APP_ICON);
+    if (!img.isEmpty())
+      logoCache = img
+        .resize({ width: 48, height: 48, quality: "best" })
+        .toDataURL();
+  } catch {}
+  return logoCache;
 }
 
 function showMenu() {
@@ -986,6 +1021,11 @@ function showMenu() {
       click: () => openInternal("bookmarks"),
     },
     {
+      label: "Downloads",
+      accelerator: "Ctrl+J",
+      click: () => openInternal("downloads"),
+    },
+    {
       label: "Downloads folder",
       click: () => shell.openPath(app.getPath("downloads")),
     },
@@ -1005,7 +1045,7 @@ function showMenu() {
     },
     { type: "separator" },
     { label: "Settings", click: () => openInternal("settings") },
-    { label: "About Syptek", click: () => openInternal("about") },
+    { label: "About Saya", click: () => openInternal("about") },
     { label: "Credits", click: () => openInternal("credits") },
   ]).popup({ window: win });
 }
@@ -1211,6 +1251,7 @@ function handleShortcut(event, input) {
   else if (ctrl && key === "p") wc?.print();
   else if (ctrl && key === "d") toggleBookmark();
   else if (ctrl && key === "h") openInternal("history");
+  else if (ctrl && !input.shift && key === "j") openInternal("downloads");
   else if (ctrl && input.shift && key === "o") openInternal("bookmarks");
   else if (ctrl && key === "e") cycleEngine(input.shift ? -1 : 1);
   else if (
@@ -1283,18 +1324,101 @@ const UA_META = {
   wow64: false,
 };
 
+// Override CDP pada halaman utama TIDAK menjalar ke iframe lintas situs (proses terpisah, mis. captcha
+// anti-bot, tombol login) maupun worker: di sana navigator.userAgentData tetap bawaan Electron (tanpa
+// "Google Chrome"), padahal header HTTP sudah mengaku Chrome. Ketidakcocokan itu dibaca sistem anti-bot.
+// Karena itu setiap target anak (iframe, worker, service worker) dipasangi override yang sama lewat
+// Target.setAutoAttach. waitForDebuggerOnStart = override terpasang SEBELUM skrip pertama target jalan.
+const uaHooked = new WeakSet();
+
+async function applyUA(wc, sessionId) {
+  const params = { userAgent: UA, userAgentMetadata: UA_META };
+  const send = (method) => wc.debugger.sendCommand(method, params, sessionId);
+  try {
+    await send("Emulation.setUserAgentOverride");
+  } catch {
+    try {
+      await send("Network.setUserAgentOverride"); // target worker tidak punya domain Emulation
+    } catch {}
+  }
+}
+
+function hookTargets(wc) {
+  if (uaHooked.has(wc)) return;
+  uaHooked.add(wc);
+  wc.debugger.on("message", async (_e, method, params) => {
+    if (method !== "Target.attachedToTarget") return;
+    const { sessionId, targetInfo, waitingForDebugger } = params || {};
+    if (!sessionId) return;
+    try {
+      if (wc.isDestroyed()) return;
+      if (config.adblock.debug)
+        console.log("[ua] target", targetInfo?.type, targetInfo?.url);
+      await applyUA(wc, sessionId);
+      // target anak bisa punya anak lagi (iframe bersarang, worker milik iframe)
+      await wc.debugger
+        .sendCommand(
+          "Target.setAutoAttach",
+          { autoAttach: true, waitForDebuggerOnStart: true, flatten: true },
+          sessionId,
+        )
+        .catch(() => {});
+    } catch {
+    } finally {
+      // WAJIB: target yang menunggu debugger tidak akan jalan sebelum dilepas
+      if (waitingForDebugger) {
+        try {
+          wc.debugger
+            .sendCommand("Runtime.runIfWaitingForDebugger", {}, sessionId)
+            .catch(() => {});
+        } catch {}
+      }
+    }
+  });
+}
+
 async function spoofUA(wc) {
   if (!config.identity.clientHints) return;
   try {
     if (wc.isDestroyed()) return;
     if (!wc.debugger.isAttached()) wc.debugger.attach("1.3");
+    hookTargets(wc);
     await wc.debugger.sendCommand("Emulation.setUserAgentOverride", {
       userAgent: UA,
       userAgentMetadata: UA_META,
     });
+    await wc.debugger.sendCommand("Target.setAutoAttach", {
+      autoAttach: true,
+      waitForDebuggerOnStart: true,
+      flatten: true,
+    });
   } catch (err) {
     console.warn("[ua] gagal mengatur identitas:", err.message);
   }
+}
+
+// Header Client Hints dipasang di level session, bukan lewat CDP: berlaku untuk semua request
+// (tab, popup login, worker, service worker) sejak request pertama, jadi selalu cocok dengan
+// navigator.userAgentData. Electron hanya mengizinkan SATU listener onBeforeSendHeaders per session,
+// jadi fungsi ini dipanggil ulang setelah ad blocker terpasang (lihat enableBlocking).
+function installClientHints(ses) {
+  if (!config.identity.clientHints) return;
+  const CH = {
+    "sec-ch-ua": UA_META.brands
+      .map((b) => `"${b.brand}";v="${b.version}"`)
+      .join(", "),
+    "sec-ch-ua-mobile": "?0",
+    "sec-ch-ua-platform": `"${UA_OS.name}"`,
+  };
+  ses.webRequest.onBeforeSendHeaders({ urls: ["https://*/*"] }, (d, cb) => {
+    try {
+      const h = d.requestHeaders;
+      for (const k of Object.keys(h)) if (k.toLowerCase() in CH) delete h[k];
+      cb({ requestHeaders: { ...h, ...CH } });
+    } catch {
+      cb({ requestHeaders: d.requestHeaders });
+    }
+  });
 }
 
 function setupSession() {
@@ -1303,6 +1427,7 @@ function setupSession() {
 
   setupPermissions(ses);
   setupDownloads(ses);
+  installClientHints(ses);
 }
 
 // ---------------------------------------------------------------
@@ -1408,28 +1533,34 @@ function setupPermissions(ses) {
 
 // ---------------------------------------------------------------
 // Unduhan: langsung ke folder Downloads (nama bentrok -> "nama (1).ext"),
-// progres di taskbar, notifikasi saat selesai (klik = tampilkan file)
+// progres di taskbar & ikon toolbar, notifikasi saat selesai (klik = tampilkan file).
+// Daftar unduhan disimpan di downloads.json (store.js). Ada dua tampilan:
+//   - panel kecil (WebContentsView di bawah ikon toolbar, pola sama dengan dropdown saran)
+//   - halaman penuh saya://downloads (Ctrl+J)
+// Renderer hanya mengirim id + aksi; path file tidak pernah datang dari renderer.
 // ---------------------------------------------------------------
-const downloads = new Set();
+const live = new Map(); // id -> DownloadItem yang sedang berjalan
+const reserved = new Set(); // path yang sedang dipakai unduhan berjalan (cegah tabrakan nama)
 const notes = new Set();
+let dlSeq = 0;
 
 function uniquePath(dir, name) {
   const base = path.basename(String(name || "")) || "download";
   const ext = path.extname(base);
   const stem = path.basename(base, ext);
   let p = path.join(dir, base);
-  for (let i = 1; fs.existsSync(p) && i < 1000; i++)
+  for (let i = 1; (fs.existsSync(p) || reserved.has(p)) && i < 1000; i++)
     p = path.join(dir, `${stem} (${i})${ext}`);
   return p;
 }
 
 function updateProgress() {
   if (!win || win.isDestroyed()) return;
-  if (!downloads.size) return win.setProgressBar(-1);
+  if (!live.size) return win.setProgressBar(-1);
   let got = 0;
   let total = 0;
   let unknown = false;
-  for (const d of downloads) {
+  for (const d of live.values()) {
     got += d.getReceivedBytes();
     const t = d.getTotalBytes();
     if (t) total += t;
@@ -1439,15 +1570,253 @@ function updateProgress() {
   else win.setProgressBar(Math.min(1, got / total));
 }
 
+// ---- teks status ----
+function fmtSize(n) {
+  if (!(n >= 0)) return "";
+  if (n < 1024) return `${Math.round(n)} B`;
+  const units = ["KB", "MB", "GB", "TB"];
+  let i = -1;
+  do {
+    n /= 1024;
+    i++;
+  } while (n >= 1024 && i < units.length - 1);
+  return `${n >= 100 ? n.toFixed(0) : n.toFixed(1)} ${units[i]}`;
+}
+
+function fmtEta(sec) {
+  if (sec < 60) return `${Math.max(1, Math.round(sec))} sec`;
+  if (sec < 3600) return `${Math.round(sec / 60)} min`;
+  return `${Math.round(sec / 3600)} hr`;
+}
+
+function fmtAgo(ts) {
+  const m = (Date.now() - ts) / 60000;
+  if (m < 1) return "Just now";
+  if (m < 60) return `${Math.floor(m)} min ago`;
+  const h = m / 60;
+  if (h < 24) return `${Math.floor(h)} hour${Math.floor(h) === 1 ? "" : "s"} ago`;
+  const d = Math.floor(h / 24);
+  return `${d} day${d === 1 ? "" : "s"} ago`;
+}
+
+function dlInfo(e) {
+  if (e.st === "completed")
+    return e.gone
+      ? "File moved or deleted"
+      : `${fmtSize(e.tot || e.got)} • ${fmtAgo(e.ts)}`;
+  if (e.st === "cancelled") return "Cancelled";
+  if (e.st === "interrupted") return "Failed";
+  const got = fmtSize(e.got);
+  const of = e.tot ? `${got} of ${fmtSize(e.tot)}` : got;
+  if (e.paused) return `${e.interrupted ? "Interrupted" : "Paused"} • ${of}`;
+  const speed = e.speed > 0 ? ` • ${fmtSize(e.speed)}/s` : "";
+  const eta =
+    e.tot && e.speed > 0 ? ` • ${fmtEta((e.tot - e.got) / e.speed)} left` : "";
+  return of + speed + eta;
+}
+
+function dlHost(u) {
+  try {
+    return new URL(u).hostname.replace(/^www\./, "");
+  } catch {
+    return "";
+  }
+}
+
+// Ikon file dari sistem operasi (sama seperti Chrome): app.getFileIcon, di-cache per ekstensi.
+// Ekstensi yang ikonnya ada di dalam file (exe, msi, ...) di-cache per file, tapi hanya setelah selesai
+// diunduh (sebelum itu filenya belum ada, jadi dipakai ikon generik ekstensinya).
+const iconCache = new Map(); // kunci -> data URL ("" = gagal -> UI memakai lencana teks)
+const iconBusy = new Set();
+const PER_FILE_ICON = new Set(["exe", "msi", "ico", "lnk", "scr", "dll", "cur", "appx"]);
+
+function dlIconKey(e) {
+  const ext = path.extname(e.n).slice(1).toLowerCase();
+  return PER_FILE_ICON.has(ext) && e.st === "completed" && !e.gone
+    ? "f:" + e.p
+    : "e:" + ext;
+}
+
+function dlIconFor(e) {
+  const key = dlIconKey(e);
+  if (!iconCache.has(key) && !iconBusy.has(key)) {
+    iconBusy.add(key);
+    if (iconCache.size > 300) iconCache.clear();
+    app
+      .getFileIcon(e.p, { size: "large" })
+      .then(
+        (img) => iconCache.set(key, img.isEmpty() ? "" : img.toDataURL()),
+        () => iconCache.set(key, ""),
+      )
+      .finally(() => {
+        iconBusy.delete(key);
+        dlNotify(true);
+      });
+  }
+  return key;
+}
+
+function dlView(e) {
+  const running = e.st === "progressing";
+  return {
+    ik: dlIconFor(e),
+    id: e.id,
+    name: e.n,
+    host: dlHost(e.u),
+    ext: path.extname(e.n).slice(1).toLowerCase().slice(0, 5),
+    state: running
+      ? e.paused
+        ? "paused"
+        : "active"
+      : e.st === "completed"
+        ? "done"
+        : e.st === "cancelled"
+          ? "cancelled"
+          : "failed",
+    pct: running && e.tot ? Math.min(1, e.got / e.tot) : -1, // -1 = ukuran tidak diketahui
+    info: dlInfo(e),
+    resumable: !!e.resumable,
+    gone: !!e.gone,
+  };
+}
+
+// { items, icons }: ikon dikirim sebagai peta kunci -> data URL, hanya untuk kunci yang dipakai
+function dlPayload(limit = Infinity) {
+  const items = stores.downloads.items.slice(0, limit).map(dlView);
+  const icons = {};
+  for (const it of items)
+    if (!(it.ik in icons)) {
+      const url = iconCache.get(it.ik);
+      if (url) icons[it.ik] = url;
+    }
+  return { items, icons };
+}
+
+// File yang sudah dihapus/dipindah ditandai (dicek saat panel/halaman dibuka)
+async function dlCheck() {
+  await Promise.all(
+    stores.downloads.items
+      .filter((e) => e.st === "completed")
+      .map((e) =>
+        fs.promises.access(e.p).then(
+          () => (e.gone = false),
+          () => (e.gone = true),
+        ),
+      ),
+  );
+}
+
+// ---- dorong perubahan ke ikon toolbar, panel, dan halaman (dibatasi ~2,5x/detik) ----
+let dlTimer = null;
+function dlNotify(now) {
+  if (now) {
+    clearTimeout(dlTimer);
+    dlTimer = null;
+    return dlFlush();
+  }
+  if (dlTimer) return;
+  dlTimer = setTimeout(() => {
+    dlTimer = null;
+    dlFlush();
+  }, 400);
+}
+
+function dlFlush() {
+  if (!win || win.isDestroyed()) return;
+  let active = 0;
+  let got = 0;
+  let total = 0;
+  let unknown = false;
+  for (const e of stores.downloads.items) {
+    if (e.st !== "progressing") continue;
+    active++;
+    got += e.got;
+    if (e.tot) total += e.tot;
+    else unknown = true;
+  }
+  sendUI("downloads:badge", {
+    active,
+    progress: active && !unknown && total ? Math.min(1, got / total) : -1,
+  });
+  if (dlp.open) {
+    dlpPaint();
+    dlpLayout();
+  }
+  const url = PAGES.downloads;
+  let snap = null;
+  for (const t of tabs.values()) {
+    if (t.suspended || !t.view) continue;
+    const wc = t.view.webContents;
+    if (wc.isDestroyed() || wc.getURL() !== url) continue;
+    wc.send("saya:downloads:update", (snap ||= dlPayload()));
+  }
+}
+
 function setupDownloads(ses) {
   ses.on("will-download", (_e, item) => {
     const file = uniquePath(app.getPath("downloads"), item.getFilename());
     item.setSavePath(file);
-    downloads.add(item);
-    item.on("updated", updateProgress);
-    item.once("done", (_e2, state) => {
-      downloads.delete(item);
+    reserved.add(file);
+    const now = Date.now();
+    const e = {
+      id: now.toString(36) + (++dlSeq).toString(36),
+      n: path.basename(file),
+      p: file,
+      u: String(item.getURL() || "").slice(0, 2048),
+      tot: item.getTotalBytes(),
+      got: 0,
+      ts: now,
+      st: "progressing",
+      // hanya di memori:
+      paused: false,
+      interrupted: false,
+      resumable: false,
+      speed: 0,
+      lastB: 0,
+      lastT: now,
+      gone: false,
+    };
+    stores.downloads.add(e);
+    live.set(e.id, item);
+    updateProgress();
+    dlNotify(true);
+
+    item.on("updated", (_e2, state) => {
+      const t = Date.now();
+      e.got = item.getReceivedBytes();
+      e.tot = item.getTotalBytes();
+      e.interrupted = state === "interrupted";
+      e.paused = e.interrupted || item.isPaused();
+      e.resumable = e.paused && item.canResume();
+      const dt = (t - e.lastT) / 1000;
+      if (e.paused) {
+        e.speed = 0;
+        e.lastB = e.got;
+        e.lastT = t;
+      } else if (dt >= 0.5) {
+        const inst = (e.got - e.lastB) / dt;
+        e.speed = e.speed ? e.speed * 0.7 + inst * 0.3 : inst; // dihaluskan
+        e.lastB = e.got;
+        e.lastT = t;
+      }
       updateProgress();
+      dlNotify();
+    });
+
+    item.once("done", (_e2, state) => {
+      live.delete(e.id);
+      reserved.delete(file);
+      e.st =
+        state === "completed" || state === "cancelled" ? state : "interrupted";
+      e.got = item.getReceivedBytes();
+      e.tot = item.getTotalBytes() || e.got;
+      e.ts = Date.now();
+      e.speed = 0;
+      e.paused = false;
+      e.gone = false;
+      stores.downloads.touch();
+      updateProgress();
+      dlNotify(true);
       if (state === "cancelled" || !Notification.isSupported()) return;
       const ok = state === "completed";
       const n = new Notification({
@@ -1462,6 +1831,228 @@ function setupDownloads(ses) {
     });
   });
 }
+
+function dlAct(id, action) {
+  if (action === "folder") {
+    shell.openPath(app.getPath("downloads"));
+    return;
+  }
+  const e = stores.downloads.get(id);
+  if (!e) return;
+  const item = live.get(id);
+  switch (action) {
+    case "open":
+      if (e.st === "completed" && !e.gone)
+        fs.promises.access(e.p).then(
+          () => shell.openPath(e.p),
+          () => {
+            e.gone = true;
+            dlNotify(true);
+          },
+        );
+      break;
+    case "show":
+      if (e.st === "completed" && !e.gone) shell.showItemInFolder(e.p);
+      else shell.openPath(path.dirname(e.p));
+      break;
+    case "pause":
+      if (item && !item.isPaused()) {
+        item.pause();
+        e.paused = true;
+        e.speed = 0;
+      }
+      break;
+    case "resume":
+      if (item?.canResume()) {
+        item.resume();
+        e.paused = false;
+        e.interrupted = false;
+        e.lastB = e.got;
+        e.lastT = Date.now();
+      }
+      break;
+    case "cancel":
+      item?.cancel(); // 'done' menandai statusnya
+      break;
+    case "retry":
+      if (!item && isWeb(e.u)) {
+        stores.downloads.remove(id);
+        session.defaultSession.downloadURL(e.u);
+      }
+      break;
+    case "copy":
+      if (isWeb(e.u)) clipboard.writeText(e.u);
+      break;
+    case "remove":
+      if (!item) stores.downloads.remove(id); // unduhan berjalan tidak bisa dihapus dari daftar
+      break;
+    default:
+      return;
+  }
+  dlNotify(true);
+}
+
+// ---- panel kecil di bawah ikon toolbar ----
+const DL_W = 360;
+const DL_HEAD = 50;
+const DL_ROW = 56;
+const DL_FOOT = 46;
+const DL_EMPTY = 72;
+const DL_MAX = 6; // baris terlihat sebelum daftar bisa di-scroll
+const DL_PANEL_ITEMS = 50;
+const dlp = {
+  view: null,
+  ready: false, // dlpanel.html sudah selesai dimuat
+  open: false,
+  rect: null, // posisi tombol toolbar {right, bottom}
+  hiddenAt: 0,
+  destroyTimer: null,
+};
+
+function dlpView() {
+  clearTimeout(dlp.destroyTimer);
+  if (dlp.view) return dlp.view;
+  const view = new WebContentsView({
+    webPreferences: {
+      sandbox: true,
+      contextIsolation: true,
+      nodeIntegration: false,
+      preload: path.join(__dirname, "dlpanelpreload.js"),
+    },
+  });
+  view.setBackgroundColor("#1c1c22");
+  try {
+    view.setBorderRadius(13);
+  } catch {}
+  view.setVisible(false);
+  const wc = view.webContents;
+  wc.on("before-input-event", handleShortcut); // Ctrl+J dst. tetap jalan saat fokus di panel
+  wc.on("will-navigate", (e) => e.preventDefault());
+  wc.setWindowOpenHandler(() => ({ action: "deny" }));
+  // Klik di luar panel (halaman / toolbar) = panel kehilangan fokus = tutup
+  wc.on("blur", () => {
+    if (dlp.view === view && dlp.open) dlpHide();
+  });
+  wc.once("did-finish-load", () => {
+    if (dlp.view !== view) return;
+    dlp.ready = true;
+    if (dlp.open) {
+      dlpPaint();
+      wc.focus();
+    }
+  });
+  wc.loadFile(path.join(RENDERER_DIR, "dlpanel.html")).catch(() => {});
+  win.contentView.addChildView(view);
+  dlp.view = view;
+  dlp.ready = false;
+  return view;
+}
+
+function dlpPaint() {
+  const wc = dlp.view?.webContents;
+  if (!dlp.ready || !wc || wc.isDestroyed()) return;
+  wc.send("dl:render", dlPayload(DL_PANEL_ITEMS));
+}
+
+function dlpLayout() {
+  if (!dlp.view || !dlp.open || !dlp.rect || !win || win.isDestroyed()) return;
+  const [w, h] = win.getContentSize();
+  const n = Math.min(stores.downloads.items.length, DL_PANEL_ITEMS);
+  const body = n ? Math.min(n, DL_MAX) * DL_ROW : DL_EMPTY;
+  const y = Math.round(dlp.rect.bottom) + 6;
+  const height = Math.max(120, Math.min(DL_HEAD + body + DL_FOOT, h - y - 8));
+  const width = Math.min(DL_W, w - 16);
+  // rata kanan dengan ikon, tetap di dalam jendela
+  const x = Math.max(8, Math.min(Math.round(dlp.rect.right - width + 6), w - width - 8));
+  dlp.view.setBounds({ x, y, width, height });
+}
+
+function dlpShow(rect) {
+  if (!win || win.isDestroyed()) return;
+  sgHide();
+  const r = rect && typeof rect === "object" ? rect : {};
+  dlp.rect = {
+    right: Number(r.right) || win.getContentSize()[0] - 8,
+    bottom: Number(r.bottom) || CHROME_H - 6,
+  };
+  dlp.open = true;
+  const view = dlpView();
+  dlpLayout();
+  win.contentView.addChildView(view); // dipasang ulang = naik ke lapisan paling atas
+  view.setVisible(true);
+  if (dlp.ready) {
+    dlpPaint();
+    view.webContents.focus();
+  }
+  // tandai file yang sudah dihapus, lalu gambar ulang
+  dlCheck().then(() => {
+    if (dlp.open && dlp.view === view) dlpPaint();
+  });
+}
+
+function dlpHide(refocusPage = false) {
+  if (!dlp.open) return;
+  dlp.open = false;
+  dlp.hiddenAt = Date.now();
+  dlp.view?.setVisible(false);
+  clearTimeout(dlp.destroyTimer);
+  dlp.destroyTimer = setTimeout(dlpDestroy, 30_000);
+  if (refocusPage) activeWC()?.focus();
+}
+
+function dlpDestroy() {
+  const view = dlp.view;
+  if (!view || dlp.open) return;
+  dlp.view = null;
+  dlp.ready = false;
+  try {
+    win?.contentView.removeChildView(view);
+  } catch {}
+  if (!view.webContents.isDestroyed()) view.webContents.close();
+}
+
+function dlpToggle(rect) {
+  if (dlp.open) return dlpHide();
+  // klik pada ikon saat panel terbuka: blur sudah menutupnya lebih dulu, jangan dibuka lagi
+  if (Date.now() - dlp.hiddenAt < 300) return;
+  dlpShow(rect);
+}
+
+const fromDlp = (e) =>
+  !!dlp.view &&
+  !dlp.view.webContents.isDestroyed() &&
+  e.sender === dlp.view.webContents;
+
+onUI("downloads:toggle", dlpToggle);
+ipcMain.on("dl:act", (e, id, action) => {
+  if (!fromDlp(e)) return;
+  action = String(action || "");
+  dlAct(String(id || ""), action);
+  if (action === "open" || action === "show") dlpHide();
+});
+ipcMain.on("dl:all", (e) => {
+  if (!fromDlp(e)) return;
+  dlpHide();
+  openInternal("downloads");
+});
+ipcMain.on("dl:close", (e) => {
+  if (fromDlp(e)) dlpHide(true);
+});
+
+// ---- halaman penuh (hanya halaman internal yang boleh memanggil) ----
+handleInternal("saya:downloads:list", async () => {
+  await dlCheck();
+  return dlPayload();
+});
+handleInternal("saya:downloads:act", (id, action) => {
+  dlAct(String(id || ""), String(action || ""));
+  return true;
+});
+handleInternal("saya:downloads:clear", () => {
+  stores.downloads.clearDone();
+  dlNotify(true);
+  return true;
+});
 
 function setupDns() {
   const { mode, servers } = config.dns;
@@ -1709,6 +2300,19 @@ function inSet(set, host) {
   return false;
 }
 
+// Tujuan yang jelas berupa login (host login/pembayaran bawaan atau path /oauth, /login, dst.)
+function isAuthTarget(u) {
+  try {
+    const x = new URL(u);
+    return (
+      inSet(exemptHosts(), x.hostname.toLowerCase()) ||
+      AUTH_PATH.test(x.pathname)
+    );
+  } catch {
+    return false;
+  }
+}
+
 let exemptSet = null;
 function exemptHosts() {
   if (!exemptSet) {
@@ -1841,6 +2445,8 @@ function enableBlocking() {
       once({});
     }
   });
+  // enableBlockingInSession bisa menimpa listener onBeforeSendHeaders: pasang lagi supaya Client Hints tetap terkirim
+  installClientHints(ses);
 }
 
 // Scriptlet untuk satu frame, dibungkus fungsi sendiri-sendiri + try/catch agar tidak saling bentrok
@@ -1876,7 +2482,7 @@ function scriptletsFor(url, wc) {
   return scripts.map(wrapScriptlet);
 }
 // sendSync: harus selalu menjawab (returnValue), kalau tidak preload halaman akan menggantung
-ipcMain.on("syptek:scriptlets", (e) => {
+ipcMain.on("saya:scriptlets", (e) => {
   let out = [];
   try {
     out = scriptletsFor(e.senderFrame?.url || "", e.sender);
@@ -1935,7 +2541,7 @@ async function setupAdblock() {
     // berbagi class (JSONPath, RangeParser, ...) saling bentrok ("Identifier ... has already been declared"),
     // sehingga aturan uBO (mis. IDLIX) hanya berlaku sebagian dan request pertama lolos. Jadi di sini hanya
     // CSS (sembunyikan elemen) yang dibiarkan lewat Ghostery; scriptlet diinjeksi dini oleh pagepreload.js
-    // lewat IPC "syptek:scriptlets" (tiap scriptlet dibungkus fungsi sendiri).
+    // lewat IPC "saya:scriptlets" (tiap scriptlet dibungkus fungsi sendiri).
     blocker.onInjectCosmeticFilters = (event, url, msg) => {
       try {
         if (isAllowlisted({ url, webContents: event.sender })) return;
@@ -2034,6 +2640,8 @@ function createWindow() {
   win.on("resize", layout);
   win.on("resize", sgHide);
   win.on("move", sgHide);
+  win.on("resize", () => dlpHide());
+  win.on("move", () => dlpHide());
   win.on("resize", scheduleSave);
   win.on("move", scheduleSave);
   win.on("close", () => {
@@ -2053,6 +2661,9 @@ function createWindow() {
     find.view = null;
     find.open = false;
     find.ready = false;
+    dlp.view = null;
+    dlp.open = false;
+    dlp.ready = false;
     tabs.clear();
   });
 }
@@ -2401,7 +3012,7 @@ function findLayout() {
   });
   // DevTools yang baru dibuka bisa menutupi bar; angkat lagi (kecuali dropdown saran sedang terbuka)
   const kids = win.contentView.children;
-  if (!sg.open && kids[kids.length - 1] !== find.view)
+  if (!sg.open && !dlp.open && kids[kids.length - 1] !== find.view)
     win.contentView.addChildView(find.view);
 }
 
@@ -2539,6 +3150,14 @@ onUI("tab:new", () => createTab(NEWTAB_URL));
 onUI("tab:close", (id) => closeTab(id));
 onUI("tab:move", (id, index) => moveTab(id, index));
 onUI("tab:activate", (id) => activateTab(id));
+onUI("tab:mute", (id) => {
+  const tab = tabs.get(id);
+  if (!tab) return;
+  tab.muted = !tab.muted;
+  if (tab.view && !tab.view.webContents.isDestroyed())
+    tab.view.webContents.setAudioMuted(tab.muted);
+  pushTab(tab);
+});
 onUI("nav:go", (input) => {
   sgHide();
   navigateActive(toUrl(input));
@@ -2556,7 +3175,11 @@ onUI("bookmark:toggle", toggleBookmark);
 onUI("menu:open", showMenu);
 onUI("site:open", showSiteMenu);
 
-handleUI("ui:init", () => ({ ...adblockState(), engine: engine().name }));
+handleUI("ui:init", () => ({
+  ...adblockState(),
+  engine: engine().name,
+  logo: appLogo(),
+}));
 handleUI("adblock:toggle", () => {
   if (!blocker) return adblockState();
   adblockOn = !adblockOn;
@@ -2565,6 +3188,7 @@ handleUI("adblock:toggle", () => {
     try {
       blocker.disableBlockingInSession(session.defaultSession);
     } catch {}
+    installClientHints(session.defaultSession); // disable bisa ikut melepas listener header
   }
   return adblockState();
 });
@@ -2572,23 +3196,23 @@ handleUI("adblock:toggle", () => {
 // ---------------------------------------------------------------
 // IPC dari halaman internal (riwayat & bookmark)
 // ---------------------------------------------------------------
-handleInternal("syptek:history:list", (opts) =>
+handleInternal("saya:history:list", (opts) =>
   stores.history.list({
     q: typeof opts?.q === "string" ? opts.q : "",
     limit: Number(opts?.limit),
     offset: Number(opts?.offset),
   }),
 );
-handleInternal("syptek:history:remove", (url) => {
+handleInternal("saya:history:remove", (url) => {
   if (typeof url === "string") stores.history.remove(url);
   return true;
 });
-handleInternal("syptek:history:clear", (since) => {
+handleInternal("saya:history:clear", (since) => {
   stores.history.clear(Number(since) || 0);
   return true;
 });
-handleInternal("syptek:bookmarks:list", () => stores.bookmarks.list());
-handleInternal("syptek:bookmarks:remove", (url) => {
+handleInternal("saya:bookmarks:list", () => stores.bookmarks.list());
+handleInternal("saya:bookmarks:remove", (url) => {
   if (typeof url === "string") stores.bookmarks.remove(url);
   refreshActive();
   return true;
@@ -2596,7 +3220,7 @@ handleInternal("syptek:bookmarks:remove", (url) => {
 
 // ---------------------------------------------------------------
 // ---------------------------------------------------------------
-// Halaman Settings (syptek://settings): bersihkan cache, batas cache web, dan DNS.
+// Halaman Settings (saya://settings): bersihkan cache, batas cache web, dan DNS.
 // Pilihan disimpan di userData/settings.json dan menimpa config.json (yang ada di folder
 // aplikasi dan bisa read-only setelah dipasang). Semua handler hanya melayani halaman internal.
 // ---------------------------------------------------------------
@@ -2626,7 +3250,7 @@ const CLEAR = {
   },
   adblock: {
     files: /^adblock-.*\.bin$/,
-    // Cache engine ad blocker dibuat ulang saat Syptek dibuka lagi
+    // Cache engine ad blocker dibuat ulang saat Saya dibuka lagi
     run: async () => {
       const dir = app.getPath("userData");
       for (const f of await fs.promises.readdir(dir).catch(() => []))
@@ -2641,7 +3265,7 @@ const CLEAR = {
     message: "Clear all cookies and logins?",
     detail:
       "You will be signed out of every website (Instagram, X, Google, and so on). " +
-      "Syptek does not store passwords itself, so you will need to sign in again.",
+      "Saya does not store passwords itself, so you will need to sign in again.",
     run: (ses) => ses.clearStorageData({ storages: ["cookies"] }),
   },
   sitedata: {
@@ -2704,13 +3328,13 @@ async function clearSize(c) {
   return n;
 }
 
-handleInternal("syptek:settings:get", () => ({
+handleInternal("saya:settings:get", () => ({
   dns: { mode: config.dns.mode, servers: config.dns.servers },
   cacheLimitMB: config.cacheLimitMB | 0,
   dataDir: app.getPath("userData"),
 }));
 
-handleInternal("syptek:settings:dns", (mode, servers) => {
+handleInternal("saya:settings:dns", (mode, servers) => {
   if (!DNS_MODES.includes(mode))
     return { ok: false, error: "Invalid DNS mode." };
   if (
@@ -2732,7 +3356,7 @@ handleInternal("syptek:settings:dns", (mode, servers) => {
   return { ok: true };
 });
 
-handleInternal("syptek:settings:cacheLimit", (mb) => {
+handleInternal("saya:settings:cacheLimit", (mb) => {
   if (!CACHE_LIMITS.includes(mb)) return { ok: false, error: "Invalid value." };
   try {
     writeSettings({ cacheLimitMB: mb });
@@ -2742,21 +3366,21 @@ handleInternal("syptek:settings:cacheLimit", (mb) => {
   return { ok: true, restart: mb !== (cacheLimitAtStart | 0) };
 });
 
-handleInternal("syptek:cache:sizes", async () => {
+handleInternal("saya:cache:sizes", async () => {
   const out = {};
   for (const [id, c] of Object.entries(CLEAR)) out[id] = await clearSize(c);
   out.total = await dirSize(app.getPath("userData"));
   return out;
 });
 
-handleInternal("syptek:cache:clear", async (id) => {
+handleInternal("saya:cache:clear", async (id) => {
   const c =
     typeof id === "string" && Object.hasOwn(CLEAR, id) ? CLEAR[id] : null;
   if (!c) return { ok: false, error: "Unknown item." };
   if (c.danger) {
     const opts = {
       type: "warning",
-      title: "Syptek",
+      title: "Saya",
       message: c.message,
       detail: c.detail,
       buttons: ["Cancel", c.button],
@@ -2783,7 +3407,7 @@ handleInternal("syptek:cache:clear", async (id) => {
   };
 });
 
-// Halaman Tentang (syptek://about) & Kredit (syptek://credits)
+// Halaman Tentang (saya://about) & Kredit (saya://credits)
 // Daftar kredit dibaca dari package.json + node_modules saat halamannya dibuka
 // (tidak ada daftar yang ditulis tangan, jadi selalu ikut dependensi yang dipakai).
 // ---------------------------------------------------------------
@@ -2917,13 +3541,13 @@ let creditsCache = null;
 const credits = () =>
   (creditsCache ||= [...staticCredits(), ...collectCredits(__dirname)]);
 
-handleInternal("syptek:about:info", () => ({
+handleInternal("saya:about:info", () => ({
   version: app.getVersion(),
   electron: process.versions.electron,
   chromium: process.versions.chrome,
   bits: process.arch === "ia32" || process.arch === "arm" ? "32-bit" : "64-bit",
 }));
-handleInternal("syptek:credits:list", () =>
+handleInternal("saya:credits:list", () =>
   credits().map((c, id) => ({
     id,
     name: c.name,
@@ -2933,10 +3557,10 @@ handleInternal("syptek:credits:list", () =>
   })),
 );
 handleInternal(
-  "syptek:credits:license",
+  "saya:credits:license",
   (id) => credits()[Number(id)]?.text() ?? "",
 );
-handleInternal("syptek:open", (name) => {
+handleInternal("saya:open", (name) => {
   if (typeof name === "string" && Object.hasOwn(PAGES, name))
     openInternal(name);
   return true;

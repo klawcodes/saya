@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; img-src data:; style-src 'self'; script-src 'self'"
+    />
+    <title>Downloads</title>
+    <link rel="stylesheet" href="dlpanel.css" />
+    <link rel="stylesheet" href="dlrow.css" />
+  </head>
+  <body>
+    <header>
+      <h1>Recent download history</h1>
+      <button id="close" class="ib" title="Close (Esc)">
+        <svg viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8" /></svg>
+      </button>
+    </header>
+    <main id="list"></main>
+    <p id="empty" hidden>No downloads yet</p>
+    <footer>
+      <button id="all" title="Open full page (Ctrl+J)">
+        <span>Full download history</span>
+        <svg viewBox="0 0 16 16"><path d="M9 2.5h4.5V7M13.5 2.5L7.5 8.5M12 9.5v3a1 1 0 0 1-1 1H3.5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h3" /></svg>
+      </button>
+    </footer>
+    <script src="dlrow.js"></script>
+    <script src="dlpanel.js"></script>
+  </body>
+</html>

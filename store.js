@@ -1,19 +1,20 @@
 // Penyimpanan ringan untuk riwayat & bookmark: satu file JSON per jenis,
 // ditulis dengan debounce (tidak membebani saat browsing) dan di-flush saat keluar.
-const fs = require('fs');
-const path = require('path');
+const fs = require("fs");
+const path = require("path");
 
-const isWeb = (u) => typeof u === 'string' && u.length < 4096 && /^https?:\/\//i.test(u);
-const clip = (s, n) => String(s || '').slice(0, n);
+const isWeb = (u) =>
+  typeof u === "string" && u.length < 4096 && /^https?:\/\//i.test(u);
+const clip = (s, n) => String(s || "").slice(0, n);
 
 // Riwayat tidak membedakan #hash, jadi dibuang supaya tidak menumpuk
 function stripHash(url) {
   try {
     const x = new URL(url);
-    x.hash = '';
+    x.hash = "";
     return x.href;
   } catch {
-    return '';
+    return "";
   }
 }
 
@@ -26,7 +27,7 @@ class Persisted {
   }
   read() {
     try {
-      return JSON.parse(fs.readFileSync(this.file, 'utf8'));
+      return JSON.parse(fs.readFileSync(this.file, "utf8"));
     } catch {
       return null;
     }
@@ -38,11 +39,17 @@ class Persisted {
       this.timer = null;
       if (!this.dirty) return;
       this.dirty = false;
-      const tmp = this.file + '.tmp';
+      const tmp = this.file + ".tmp";
       fs.promises
         .writeFile(tmp, JSON.stringify(this.snapshot()))
         .then(() => fs.promises.rename(tmp, this.file))
-        .catch((e) => console.error('[store] gagal menyimpan', path.basename(this.file), e.message));
+        .catch((e) =>
+          console.error(
+            "[store] gagal menyimpan",
+            path.basename(this.file),
+            e.message,
+          ),
+        );
     }, this.delay);
   }
   flushSync() {
@@ -53,7 +60,11 @@ class Persisted {
     try {
       fs.writeFileSync(this.file, JSON.stringify(this.snapshot()));
     } catch (e) {
-      console.error('[store] gagal menyimpan', path.basename(this.file), e.message);
+      console.error(
+        "[store] gagal menyimpan",
+        path.basename(this.file),
+        e.message,
+      );
     }
   }
 }
@@ -65,7 +76,8 @@ class History extends Persisted {
     this.map = new Map(); // url -> { t: judul, ts: kunjungan terakhir, n: jumlah kunjungan }
     const data = this.read();
     if (Array.isArray(data)) {
-      for (const [u, t, ts, n] of data) if (isWeb(u)) this.map.set(u, { t: t || '', ts: ts || 0, n: n || 1 });
+      for (const [u, t, ts, n] of data)
+        if (isWeb(u)) this.map.set(u, { t: t || "", ts: ts || 0, n: n || 1 });
     }
   }
   snapshot() {
@@ -93,7 +105,9 @@ class History extends Persisted {
     }
   }
   prune() {
-    const keep = [...this.map].sort((a, b) => b[1].ts - a[1].ts).slice(0, this.max);
+    const keep = [...this.map]
+      .sort((a, b) => b[1].ts - a[1].ts)
+      .slice(0, this.max);
     this.map = new Map(keep);
   }
   // Saran address bar: awalan alamat > awalan judul > mengandung; lalu paling sering & terbaru
@@ -103,19 +117,38 @@ class History extends Persisted {
     const now = Date.now();
     const hits = [];
     for (const [u, e] of this.map) {
-      const bare = u.slice(u.indexOf('//') + 2).replace(/^www\./, '').toLowerCase();
+      const bare = u
+        .slice(u.indexOf("//") + 2)
+        .replace(/^www\./, "")
+        .toLowerCase();
       const title = e.t.toLowerCase();
-      const base = bare.startsWith(needle) ? 3 : title.startsWith(needle) ? 2 : bare.includes(needle) || title.includes(needle) ? 1 : 0;
-      if (base) hits.push({ u, t: e.t, score: base * 100 + Math.min(e.n, 30) + e.ts / now });
+      const base = bare.startsWith(needle)
+        ? 3
+        : title.startsWith(needle)
+          ? 2
+          : bare.includes(needle) || title.includes(needle)
+            ? 1
+            : 0;
+      if (base)
+        hits.push({
+          u,
+          t: e.t,
+          score: base * 100 + Math.min(e.n, 30) + e.ts / now,
+        });
     }
     return hits.sort((a, b) => b.score - a.score).slice(0, limit);
   }
-  list({ q = '', limit = 100, offset = 0 } = {}) {
+  list({ q = "", limit = 100, offset = 0 } = {}) {
     const needle = clip(q, 200).trim().toLowerCase();
     limit = Math.min(500, Math.max(1, limit | 0 || 100));
     offset = Math.max(0, offset | 0);
     let rows = [...this.map].map(([u, e]) => ({ u, t: e.t, ts: e.ts }));
-    if (needle) rows = rows.filter((r) => r.u.toLowerCase().includes(needle) || r.t.toLowerCase().includes(needle));
+    if (needle)
+      rows = rows.filter(
+        (r) =>
+          r.u.toLowerCase().includes(needle) ||
+          r.t.toLowerCase().includes(needle),
+      );
     rows.sort((a, b) => b.ts - a.ts);
     return { total: rows.length, items: rows.slice(offset, offset + limit) };
   }
@@ -146,7 +179,8 @@ class Bookmarks extends Persisted {
     if (!isWeb(url)) return false;
     const i = this.items.findIndex((b) => b.u === url);
     if (i >= 0) this.items.splice(i, 1);
-    else this.items.push({ u: url, t: clip(title, 300) || url, ts: Date.now() });
+    else
+      this.items.push({ u: url, t: clip(title, 300) || url, ts: Date.now() });
     this.touch();
     return i < 0;
   }
@@ -168,26 +202,28 @@ class Permissions extends Persisted {
     super(file, 300);
     this.map = new Map();
     const data = this.read();
-    if (data && typeof data === 'object' && !Array.isArray(data)) {
-      for (const [k, v] of Object.entries(data)) if (typeof v === 'boolean') this.map.set(k, v);
+    if (data && typeof data === "object" && !Array.isArray(data)) {
+      for (const [k, v] of Object.entries(data))
+        if (typeof v === "boolean") this.map.set(k, v);
     }
   }
   snapshot() {
     return Object.fromEntries(this.map);
   }
   get(origin, perm) {
-    return this.map.get(origin + '|' + perm); // true | false | undefined (belum diputuskan)
+    return this.map.get(origin + "|" + perm); // true | false | undefined (belum diputuskan)
   }
   set(origin, perm, allow) {
-    this.map.set(origin + '|' + perm, !!allow);
+    this.map.set(origin + "|" + perm, !!allow);
     this.touch();
   }
   forget(origin, perm) {
-    if (this.map.delete(origin + '|' + perm)) this.touch();
+    if (this.map.delete(origin + "|" + perm)) this.touch();
   }
   clearOrigin(origin) {
     let n = 0;
-    for (const k of [...this.map.keys()]) if (k.startsWith(origin + '|') && this.map.delete(k)) n++;
+    for (const k of [...this.map.keys()])
+      if (k.startsWith(origin + "|") && this.map.delete(k)) n++;
     if (n) this.touch();
   }
   clear() {
@@ -196,26 +232,50 @@ class Permissions extends Persisted {
   }
 }
 
-// Tab yang terbuka + ukuran/posisi jendela, dipulihkan saat Syptek dibuka lagi
+// Tab yang terbuka + ukuran/posisi jendela, dipulihkan saat Saya dibuka lagi
 class SessionState extends Persisted {
   constructor(file) {
     super(file, 1000);
     const d = this.read();
-    const ok = d && typeof d === 'object';
-    this.tabs = ok && Array.isArray(d.tabs)
-      ? d.tabs.filter((t) => t && isWeb(t.u)).slice(0, 50).map((t) => ({ u: t.u, t: clip(t.t, 300) }))
-      : [];
-    this.active = ok && Number.isInteger(d.active) && d.active >= 0 ? d.active : 0;
+    const ok = d && typeof d === "object";
+    this.tabs =
+      ok && Array.isArray(d.tabs)
+        ? d.tabs
+            .filter((t) => t && isWeb(t.u))
+            .slice(0, 50)
+            .map((t) => ({ u: t.u, t: clip(t.t, 300) }))
+        : [];
+    this.active =
+      ok && Number.isInteger(d.active) && d.active >= 0 ? d.active : 0;
     const b = ok ? d.bounds : null;
     const num = (n) => Number.isFinite(n);
-    this.bounds = b && num(b.x) && num(b.y) && num(b.width) && num(b.height) && b.width >= 640 && b.height >= 400
-      ? { x: Math.round(b.x), y: Math.round(b.y), width: Math.round(b.width), height: Math.round(b.height) }
-      : null;
+    this.bounds =
+      b &&
+      num(b.x) &&
+      num(b.y) &&
+      num(b.width) &&
+      num(b.height) &&
+      b.width >= 640 &&
+      b.height >= 400
+        ? {
+            x: Math.round(b.x),
+            y: Math.round(b.y),
+            width: Math.round(b.width),
+            height: Math.round(b.height),
+          }
+        : null;
     this.maximized = !!ok && d.maximized === true;
-    this.engine = ok && typeof d.engine === 'string' ? d.engine.slice(0, 40) : ''; // id mesin pencari terakhir
+    this.engine =
+      ok && typeof d.engine === "string" ? d.engine.slice(0, 40) : ""; // id mesin pencari terakhir
   }
   snapshot() {
-    return { tabs: this.tabs, active: this.active, bounds: this.bounds, maximized: this.maximized, engine: this.engine };
+    return {
+      tabs: this.tabs,
+      active: this.active,
+      bounds: this.bounds,
+      maximized: this.maximized,
+      engine: this.engine,
+    };
   }
   setEngine(id) {
     if (this.engine === id) return;
@@ -231,21 +291,89 @@ class SessionState extends Persisted {
   }
 }
 
+// Daftar unduhan (maks 200): hanya metadata; file aslinya ada di folder Downloads.
+// Unduhan yang belum selesai saat Saya ditutup dimuat ulang sebagai "gagal" (bisa di-retry).
+class Downloads extends Persisted {
+  constructor(file, max = 200) {
+    super(file, 1000);
+    this.max = max;
+    const data = this.read();
+    const num = (n) => (Number.isFinite(n) && n >= 0 ? n : 0);
+    this.items = Array.isArray(data)
+      ? data
+          .filter(
+            (d) =>
+              d &&
+              typeof d.id === "string" &&
+              typeof d.n === "string" &&
+              typeof d.p === "string",
+          )
+          .slice(0, max)
+          .map((d) => ({
+            id: d.id.slice(0, 40),
+            n: clip(d.n, 260),
+            p: clip(d.p, 1024),
+            u: clip(d.u, 2048),
+            tot: num(d.tot),
+            got: num(d.got),
+            ts: num(d.ts),
+            st: d.st === "completed" || d.st === "cancelled" ? d.st : "interrupted",
+          }))
+      : [];
+  }
+  snapshot() {
+    return this.items.map(({ id, n, p, u, tot, got, ts, st }) => ({
+      id, n, p, u, tot, got, ts, st,
+    }));
+  }
+  get(id) {
+    return this.items.find((e) => e.id === id);
+  }
+  add(entry) {
+    this.items.unshift(entry); // terbaru di depan
+    while (this.items.length > this.max) {
+      let i = this.items.length - 1;
+      while (i >= 0 && this.items[i].st === "progressing") i--;
+      if (i < 0) break;
+      this.items.splice(i, 1);
+    }
+    this.touch();
+  }
+  remove(id) {
+    const i = this.items.findIndex((e) => e.id === id);
+    if (i >= 0) {
+      this.items.splice(i, 1);
+      this.touch();
+    }
+  }
+  // Hapus riwayat saja (file tetap ada); unduhan yang sedang berjalan dipertahankan
+  clearDone() {
+    this.items = this.items.filter((e) => e.st === "progressing");
+    this.touch();
+  }
+}
+
 function createStores(dir, cfg) {
-  const history = new History(path.join(dir, 'history.json'), cfg.history.maxEntries);
-  const bookmarks = new Bookmarks(path.join(dir, 'bookmarks.json'));
-  const permissions = new Permissions(path.join(dir, 'permissions.json'));
-  const session = new SessionState(path.join(dir, 'session.json'));
+  const history = new History(
+    path.join(dir, "history.json"),
+    cfg.history.maxEntries,
+  );
+  const bookmarks = new Bookmarks(path.join(dir, "bookmarks.json"));
+  const permissions = new Permissions(path.join(dir, "permissions.json"));
+  const session = new SessionState(path.join(dir, "session.json"));
+  const downloads = new Downloads(path.join(dir, "downloads.json"));
   return {
     history,
     bookmarks,
     permissions,
     session,
+    downloads,
     flush() {
       history.flushSync();
       bookmarks.flushSync();
       permissions.flushSync();
       session.flushSync();
+      downloads.flushSync();
     },
   };
 }
