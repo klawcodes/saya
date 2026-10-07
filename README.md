@@ -1,58 +1,123 @@
-# Saya
+<div align="center">
+    <img src="renderer/logo.png"
+        title="Saya" alt="Saya logo" width="120" />
+    <h1>Saya</h1>
+    <p>
+        It's just a browser, no gimmick.
+        <br>
+        Fast, lightweight, and built to stay out of your way.
+    </p>
+</div>
 
-Jalankan: `npm install` lalu `npm start`.
+## Why Saya?
 
-## Pintasan
+Saya is a Chromium-based browser (built on Electron) with one goal: open pages
+quickly, use little memory, and not get in your way. No account, no sidebar full
+of widgets, no AI assistant, no shopping tools. Just tabs, an address bar, and
+a good ad blocker.
 
-| Tombol                | Fungsi                                                   |
-| --------------------- | -------------------------------------------------------- |
-| Ctrl+T / Ctrl+W       | Tab baru / tutup tab                                     |
-| Ctrl+L                | Fokus ke address bar                                     |
-| Ctrl+D                | Tambah / hapus bookmark                                  |
-| Ctrl+H                | Riwayat (`saya://history`)                               |
-| Ctrl+Shift+O          | Bookmark (`saya://bookmarks`)                            |
-| Ctrl+Shift+T          | Buka kembali tab yang ditutup                            |
-| Ctrl+E / Ctrl+Shift+E | Ganti mesin pencari (maju / mundur)                      |
-| Alt+1 … Alt+9         | Pilih mesin pencari langsung (urutan di `searchEngines`) |
-| ↑ / ↓ di address bar  | Pilih saran                                              |
-| Ctrl+P                | Cetak                                                    |
-| Ctrl+Tab              | Pindah tab                                               |
-| Seret tab             | Ubah urutan tab (urutan ikut tersimpan di sesi)          |
+## Features
 
-## Halaman internal
+### Fast and light
 
-`saya://history`, `saya://bookmarks`, `saya://about` (versi & hak cipta), `saya://credits` (daftar kredit & lisensi, dibaca otomatis dari dependensi produksi). About/Kredit juga ada di menu (⋯).
+- **Tab sleeping**: idle tabs are put to sleep to free RAM and wake when you open them.
+  Under low-memory pressure they sleep sooner. Sites like WhatsApp Web and Google Meet
+  can be excluded, and tabs using your mic or camera are kept awake
+- **Restores your session**: tabs and window size come back after a restart
+- **Small, clean UI**: compact tab bar that adapts to how many tabs you have,
+  drag to reorder, and the address bar widens while you type
 
-## Info & izin situs
+### Privacy
 
-Tombol di kiri address bar (ikon penyetel) membuka menu izin untuk situs yang sedang dibuka: mikrofon, kamera, lokasi, clipboard (Tanya / Izinkan / Blokir), reset izin situs itu saja, dan muat ulang. Notifikasi selalu diblokir.
+- **Built-in ad blocker** with uBlock-style filtering: network rules, cosmetic filters,
+  scriptlets, and popup blocking
+  - Never blocks the page you're navigating to, and fails open instead of breaking sites
+  - Built-in exemptions for login, captcha, and payment pages
+  - Pause it per site, or right-click an element and choose _Block this element_
+- **Secure DNS (DNS over HTTPS)** with Cloudflare, Google, and Quad9 by default;
+  switch between secure, automatic, or off in Settings
+- **Per-site permissions**: asked once, remembered, and easy to reset from the site info button
+- Search suggestions can be turned off or kept local
 
-## config.json (tambahan)
+### Everyday tools
 
-- `identity.clientHints`: UA + Client Hints ala Chrome (lewat CDP). Matikan hanya untuk uji coba login Google.
-- `searchEngine` (id mesin awal), `searchEngines` (daftar: `id`, `name`, `url`, `suggest`; `%s` = kata kunci). Pilihan terakhir tersimpan di `session.json`.
-- `suggestions.enabled`, `suggestions.remote`: dropdown saran di address bar. `remote: false` = hanya riwayat & bookmark, tidak ada ketikan yang dikirim ke mesin pencari.
-- `restoreTabs`: buka kembali tab terakhir saat Saya dijalankan (tab dimuat saat dibuka, jadi startup tetap ringan).
-- `history.enabled`, `history.maxEntries`: riwayat aktif/tidak dan batas jumlah entri (yang terlama dibuang).
-- `tabSuspend.enabled`, `tabSuspend.afterMinutes`: tab latar belakang yang menganggur selama N menit
-  ditidurkan (RAM dibebaskan). Tab yang sedang memutar audio, memuat, atau membuka DevTools tidak ditidurkan.
+- **Downloads manager**: toolbar button with live progress, a quick "Recent download history"
+  panel, and a full page with search, pause/resume, retry, and show in folder (`Ctrl+J`)
+- **Find in page** (`Ctrl+F`) with match counter
+- **Audio indicator** on tabs that are playing sound; click it to mute
+- **History and bookmarks** with their own pages
+- **Multiple search engines** (Google, DuckDuckGo, Brave Search): switch with
+  `Ctrl+E` or `Alt+1` to `Alt+9`
+- **Settings page** (`saya://settings`) to clear caches, cookies, and site data,
+  limit cache size, and choose your DNS mode
+- **Works with the sites you use**, including Google sign-in
 
-Data riwayat & bookmark disimpan sebagai `history.json` dan `bookmarks.json` di folder userData Electron.
+## Keyboard shortcuts
 
-Izin situs (kamera, mikrofon, lokasi, clipboard) disimpan di `permissions.json`, tab terakhir di `session.json`; reset izin lewat menu.
-Unduhan disimpan otomatis ke folder Downloads.
+| Shortcut                | Action                          |
+| ----------------------- | ------------------------------- |
+| `Ctrl+T` / `Ctrl+W`     | New tab / close tab             |
+| `Ctrl+Shift+T`          | Reopen closed tab               |
+| `Ctrl+Tab`              | Next tab (`Shift` for previous) |
+| `Ctrl+L`                | Focus the address bar           |
+| `Ctrl+F`                | Find in page                    |
+| `Ctrl+D`                | Bookmark this page              |
+| `Ctrl+H`                | History                         |
+| `Ctrl+Shift+O`          | Bookmarks                       |
+| `Ctrl+J`                | Downloads                       |
+| `Ctrl+E`                | Switch search engine            |
+| `Alt+←` / `Alt+→`       | Back / forward                  |
+| `F5` / `Ctrl+R`         | Reload                          |
+| `Ctrl+` `+` / `-` / `0` | Zoom in / out / reset           |
+| `F12`                   | Developer tools                 |
 
-## Build (Saya.exe)
+## Downloads
 
-`npm run build` membuat `dist/Saya-win32-x64/Saya.exe`. Dengan build ini Task Manager menampilkan "Saya", bukan "Electron"
-(saat `npm start`, subproses Chromium memakai nama `electron.exe` bawaan). Ikon bisa ditambah dengan `--icon=icon.ico` pada skrip build.
-Di versi build, `config.json` ada di `resources/app/`. DevTools (F12) terbelah di kanan jendela (di bawah kalau jendela sempit).
+> [!NOTE]
+> Saya is in early development, so unexpected issues may occur.
+> Please report them if they haven't already been reported.
 
-## Ikon & logo
+Get the latest build from the
+[Releases page](../../releases/latest).
 
-- `icon.ico` (folder proyek): ikon jendela/taskbar saat `npm start` dan ikon `Saya.exe` / desktop saat `npm run build`. Buat multi-ukuran (16, 24, 32, 48, 64, 128, 256 px). Letakkan sebelum build, karena skrip build memakai `--icon=icon.ico`.
-- `renderer/logo.png` (PNG persegi, 256 atau 512 px): logo di halaman `saya://about`. Kalau file ini belum ada, dipakai logo SVG bawaan.
+- **Windows x64**: download the archive, extract it, and run `Saya.exe`
+- macOS and Linux: not available yet
 
-## Data lama (Sift)
+## Configuration
 
-Saat pertama kali dijalankan, data dari folder `Sift` di `%APPDATA%` (riwayat, bookmark, sesi, izin, login) disalin otomatis ke folder `Saya`. Folder lama tidak dihapus.
+Saya reads `config.json` from the project folder. You can change the default search engine,
+ad blocker level and allowlist, DNS servers, history size, and tab sleep timing.
+Changes made on the Settings page are saved to your user data folder and take priority
+over `config.json`.
+
+## Development
+
+Requires [Node.js](https://nodejs.org/).
+
+```bash
+git clone <!-- TODO: your repo URL -->
+cd saya
+npm install
+npm start
+```
+
+## Reporting issues
+
+Found a bug or have a request? Open an [issue](../../issues). For bugs, please include your
+Saya version (`saya://about`) and the site where it happened.
+
+## Credits
+
+Saya stands on the shoulders of great open source projects:
+
+- [Electron](https://www.electronjs.org/) and [Chromium](https://www.chromium.org/), the foundation of the browser
+- [uBlock Origin](https://github.com/gorhill/uBlock) scriptlets and filter lists, and the
+  [Ghostery adblocker](https://github.com/ghostery/adblocker) engine <!-- TODO: confirm both against your Credits page -->
+
+The full list of third-party packages and licenses is available at `saya://credits`.
+
+## License
+
+<!-- TODO: pick a license and add a LICENSE file, then fix this line -->
+
+See [LICENSE](LICENSE).
