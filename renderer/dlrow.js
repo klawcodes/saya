@@ -56,6 +56,7 @@
   function update(el, it, full, icons) {
     el.dataset.id = it.id;
     el.dataset.s = it.state;
+    el.draggable = it.state === "done" && !it.gone; // hanya file yang sudah selesai & masih ada
     if (it.gone) el.dataset.g = "1";
     else delete el.dataset.g;
 
@@ -119,12 +120,19 @@
   }
 
   // Satu listener untuk semua baris: tombol -> aksinya, klik baris -> "open"
-  function bind(list, onAct) {
+  function bind(list, onAct, onDrag) {
     list.addEventListener("click", (e) => {
       const row = e.target.closest(".dl");
       if (!row) return;
       const b = e.target.closest("button[data-a]");
       onAct(row.dataset.id, b ? b.dataset.a : "open");
+    });
+    // Seret baris = seret file aslinya (drag & drop sistem dimulai oleh proses utama)
+    list.addEventListener("dragstart", (e) => {
+      const row = e.target.closest?.(".dl");
+      if (!row) return;
+      e.preventDefault();
+      if (onDrag && row.draggable) onDrag(row.dataset.id);
     });
     list.addEventListener("keydown", (e) => {
       if (e.key === "Enter" && e.target.classList.contains("dl"))

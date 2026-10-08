@@ -19,14 +19,16 @@
   --f144: 144px;
   --f233: 233px;
 
-  --tab-h: 34px;
-  --bar-h: 42px;
+  --tab-h: 28px;
+  --bar-h: 34px;
   --ctl: 26px;
-  --ico: 16px;
+  --ico: 18px;
   --addr-w: min(
     377px,
     calc(100% - 288px)
   ); /* sisakan 2 x 144px untuk tombol kiri/kanan */
+  --strip-h: var(--ctl); /* setara address bar (26px); ubah kalau mau beda */
+  --bg-strip: var(--bg); /* warna panel; lihat opsi di bawah */
 
   --bg: #141418; /* bingkai & tab bar */
   --bg-tab: #1c1c22; /* toolbar & tab aktif */
@@ -64,7 +66,7 @@ body {
   flex: none;
   width: 16px;
   height: 16px;
-  margin: 0 var(--f8) 8px var(--f5);
+  margin: 0 var(--f8) 4.5px var(--f5);
   pointer-events: none;
 }
 #tabbar {
@@ -274,6 +276,7 @@ body {
 
 /* ---------- Toolbar ---------- */
 #toolbar {
+  position: relative;
   height: var(--bar-h);
   display: grid;
   grid-template-columns: 1fr var(--addr-w) 1fr; /* address bar selalu di tengah */
@@ -367,7 +370,7 @@ body {
   stroke: none;
 }
 #new-tab {
-  margin: 0 0 var(--f3) var(--f5);
+  margin: 0 0 2px var(--f5);
   height: var(--f21);
   min-width: var(--f21);
   padding: 0;

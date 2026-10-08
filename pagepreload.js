@@ -125,6 +125,7 @@ if (location.protocol === "file:") {
     downloadsList: () => call("saya:downloads:list"),
     downloadsAct: (id, action) => call("saya:downloads:act", id, action),
     downloadsClear: () => call("saya:downloads:clear"),
+    downloadsDrag: (id) => ipcRenderer.send("saya:downloads:drag", String(id)),
     downloadsOnUpdate: (cb) =>
       ipcRenderer.on("saya:downloads:update", (_e, items) => cb(items)),
     open: (name) => call("saya:open", name),

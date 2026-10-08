@@ -29,7 +29,11 @@
     render();
   };
 
-  DL.bind(list, (id, action) => api.downloadsAct(id, action));
+  DL.bind(
+    list,
+    (id, action) => api.downloadsAct(id, action),
+    (id) => api.downloadsDrag(id),
+  );
   q.addEventListener("input", render);
   $("folder").addEventListener("click", () => api.downloadsAct("", "folder"));
 

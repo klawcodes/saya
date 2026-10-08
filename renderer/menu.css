@@ -1,0 +1,63 @@
+/* Menu titik tiga (panel). Warna & jarak mengikuti toolbar (style.css): Fibonacci 3 5 8 13 21 */
+:root {
+  --bg: #1c1c22; --bg-hover: #26262e; --line: #30303c; --btn-hover: #3a3a45;
+  --fg: #e4e4ea; --fg-dim: #a8a8b3; --fg-faint: #7a7a88; --accent: #7c8cff;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body {
+  height: 100%;
+  background: var(--bg);
+  color: var(--fg);
+  font: 13px/1.4 "Segoe UI", system-ui, sans-serif;
+  overflow: hidden;
+  user-select: none;
+}
+body { border: 1px solid var(--line); border-radius: 13px; }
+#m { max-height: 100%; overflow-y: auto; padding: 8px 5px; }
+#m::-webkit-scrollbar { width: 8px; }
+#m::-webkit-scrollbar-thumb { background: var(--btn-hover); border-radius: 4px; }
+
+.item {
+  width: 100%;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  padding: 0 13px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--fg);
+  font: inherit;
+  text-align: left;
+}
+.item:hover:not(:disabled), .item:focus-visible { background: var(--bg-hover); outline: none; }
+.item:disabled { opacity: 0.4; }
+.item .lb { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.4; }
+.item .ac { color: var(--fg-faint); font-size: 12px; line-height: 1.4; }
+.ic { flex: none; width: 16px; height: 16px; color: var(--fg-dim); }
+.ic svg, .zb svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
+.info { height: 26px; display: flex; align-items: center; padding: 0 13px 0 42px; color: var(--fg-faint); font-size: 12px; line-height: 1.4; }
+.sep { height: 1px; margin: 5px 8px; background: var(--line); }
+
+/* Baris Zoom: [ikon] Zoom ........ [-] 100% [+] | [layar penuh] */
+.zoom { height: 40px; display: flex; align-items: center; gap: 13px; padding: 0 8px 0 13px; border-radius: 8px; }
+.zoom .lb { flex: 1; line-height: 1.4; }
+.zg { display: flex; align-items: center; gap: 3px; }
+.zb {
+  min-width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  padding: 0 5px;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  color: var(--fg);
+  font: inherit;
+}
+.zb:hover { background: var(--btn-hover); }
+.zb:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.zb.pct { min-width: 48px; font-variant-numeric: tabular-nums; }
+.zd { width: 1px; height: 21px; margin: 0 8px 0 5px; background: var(--line); }

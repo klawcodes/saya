@@ -12,6 +12,11 @@
   const siteBtn = document.getElementById("site");
   const dlBtn = document.getElementById("downloads");
   const brandEl = document.getElementById("brand");
+  const toolbar = document.getElementById("toolbar");
+  const address = document.getElementById("address");
+
+  let addrReady = false;
+  let readyTimer = null;
 
   const CLOSE_SVG =
     '<svg viewBox="0 0 8 8" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M1 1l6 6M7 1L1 7"/></svg>';
@@ -154,6 +159,41 @@
     countTabs();
   });
 
+  function addrAnimMs() {
+    // Baca durasi dari CSS supaya tidak perlu disamakan manual.
+    // Dengan prefers-reduced-motion hasilnya 0, jadi popup langsung muncul.
+    return (
+      (parseFloat(getComputedStyle(toolbar).transitionDuration) || 0) * 1000
+    );
+  }
+
+  function onAddrReady() {
+    if (addrReady) return;
+    addrReady = true;
+    clearTimeout(readyTimer);
+    // Animasi selesai: tampilkan suggestion (posisi dihitung ulang di sini)
+    if (document.activeElement === address) refreshSuggestions();
+  }
+
+  address.addEventListener("focus", () => {
+    addrReady = false;
+    clearTimeout(readyTimer);
+    // Cadangan kalau transitionend tidak terkirim
+    readyTimer = setTimeout(onAddrReady, addrAnimMs() + 30);
+  });
+
+  address.addEventListener("blur", () => {
+    addrReady = false;
+    clearTimeout(readyTimer);
+  });
+
+  // Sinyal utama: animasi pelebaran selesai
+  toolbar.addEventListener("transitionend", (e) => {
+    if (e.target === toolbar && e.propertyName === "grid-template-columns") {
+      onAddrReady();
+    }
+  });
+
   // ---------- Geser tab untuk mengubah urutan ----------
   // Ringan: listener bergerak hanya terpasang selama drag; tab digeser dengan transform (tanpa layout ulang
   // berulang) dan urutan DOM ditukar saat melewati tengah tab tetangga. Urutan akhir dikirim sekali ke main.
@@ -262,6 +302,18 @@
     }
     if (document.activeElement === addressEl) querySuggest(true);
   });
+  // Ketikan dari halaman Tab Baru diteruskan ke address bar (lihat newTabTyping di main.js)
+  api.on("address:type", (text) => {
+    if (typeof text !== "string" || !text) return;
+    if (!(document.activeElement === addressEl && document.hasFocus())) {
+      addressEl.focus();
+      addressEl.value = "";
+    }
+    addressEl.value += text;
+    const n = addressEl.value.length;
+    addressEl.setSelectionRange(n, n);
+    querySuggest(false);
+  });
   api.on("suggest:fill", (text) => {
     if (typeof text === "string") addressEl.value = text;
   });
@@ -292,6 +344,17 @@
       ? `Downloading ${s.active} file${s.active > 1 ? "s" : ""} (Ctrl+J)`
       : "Downloads (Ctrl+J)";
   });
+  // Laporkan posisi ikon unduhan ke main (dipakai panel yang muncul otomatis saat unduhan dimulai)
+  const reportAnchor = () => {
+    const r = dlBtn.getBoundingClientRect();
+    api.downloadsAnchor({ right: r.right, bottom: r.bottom });
+  };
+  reportAnchor();
+  let anchorRaf = 0;
+  addEventListener("resize", () => {
+    cancelAnimationFrame(anchorRaf);
+    anchorRaf = requestAnimationFrame(reportAnchor);
+  });
   dlBtn.addEventListener("click", () => {
     const r = dlBtn.getBoundingClientRect();
     api.downloadsToggle({ right: r.right, bottom: r.bottom });
@@ -307,7 +370,10 @@
   forwardBtn.addEventListener("click", () => api.forward());
   reloadBtn.addEventListener("click", () => api.reload());
   starBtn.addEventListener("click", () => api.toggleBookmark());
-  menuBtn.addEventListener("click", () => api.menu());
+  menuBtn.addEventListener("click", () => {
+    const r = menuBtn.getBoundingClientRect();
+    api.menu({ right: r.right, bottom: r.bottom });
+  });
   siteBtn.addEventListener("click", () => api.site());
 
   addressEl.addEventListener("keydown", (e) => {
@@ -331,6 +397,20 @@
     syncToolbar();
   });
   addressEl.addEventListener("input", () => querySuggest(false));
+
+  // Drop file (mis. dari panel unduhan) di tab bar / toolbar: gambar, txt, dan pdf dibuka di tab baru
+  const hasFiles = (e) =>
+    e.dataTransfer && [...e.dataTransfer.types].includes("Files");
+  document.addEventListener("dragover", (e) => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+  });
+  document.addEventListener("drop", (e) => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    api.openFiles([...e.dataTransfer.files].map((f) => api.pathForFile(f)));
+  });
 
   api.init().then((s) => {
     applyAdblock(s);

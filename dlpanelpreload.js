@@ -4,6 +4,8 @@ const { contextBridge, ipcRenderer } = require("electron");
 contextBridge.exposeInMainWorld("dlAPI", {
   onRender: (cb) => ipcRenderer.on("dl:render", (_e, p) => cb(p)),
   act: (id, action) => ipcRenderer.send("dl:act", String(id), String(action)),
+  hover: (over) => ipcRenderer.send("dl:hover", !!over),
+  drag: (id) => ipcRenderer.send("dl:drag", String(id)),
   all: () => ipcRenderer.send("dl:all"),
   close: () => ipcRenderer.send("dl:close"),
 });

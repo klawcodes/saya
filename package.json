@@ -1,12 +1,12 @@
 {
   "name": "saya",
   "productName": "Saya",
-  "version": "0.3.30-beta",
+  "version": "0.3.70-beta",
   "description": "Saya, a lightweight Chromium browser (Electron) with a built-in ad blocker, secure DNS, and tab sleeping",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "build": "electron-packager . Saya --platform=win32 --arch=x64 --out=dist --overwrite --ignore=\"^/dist($|/)\" --icon=icon.ico --win32metadata.ProductName=Saya --win32metadata.FileDescription=Saya --win32metadata.InternalName=Saya --win32metadata.OriginalFilename=Saya.exe --win32metadata.CompanyName=\"RIOT REVENGER\" --app-copyright=\"Copyright (c) RIOT REVENGER\""
+    "build": "electron-packager . Saya --platform=win32 --arch=x64 --out=dist --overwrite --ignore=\"^/(dist|installer|\\.git)($|/)\" --icon=icon.ico --win32metadata.ProductName=Saya --win32metadata.FileDescription=Saya --win32metadata.InternalName=Saya --win32metadata.OriginalFilename=Saya.exe --win32metadata.CompanyName=\"RIOT REVENGER\" --app-copyright=\"Copyright (c) RIOT REVENGER\""
   },
   "dependencies": {
     "@ghostery/adblocker": "^2.18.2",

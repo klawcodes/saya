@@ -1,4 +1,4 @@
-const { contextBridge, ipcRenderer } = require("electron");
+const { contextBridge, ipcRenderer, webUtils } = require("electron");
 
 const EVENTS = new Set([
   "tab:created",
@@ -11,6 +11,7 @@ const EVENTS = new Set([
   "engine:changed",
   "suggest:fill",
   "downloads:badge",
+  "address:type",
 ]);
 
 const send = (channel, ...args) => ipcRenderer.send(channel, ...args);
@@ -27,10 +28,23 @@ contextBridge.exposeInMainWorld("browserAPI", {
   forward: () => send("nav:forward"),
   reload: () => send("nav:reload"),
   toggleBookmark: () => send("bookmark:toggle"),
-  menu: () => send("menu:open"),
+  menu: (rect) => send("menu:open", rect),
   toggleAdblock: () => ipcRenderer.invoke("adblock:toggle"),
   site: () => send("site:open"),
   downloadsToggle: (rect) => send("downloads:toggle", rect),
+  downloadsAnchor: (rect) => send("downloads:anchor", rect),
+  // File yang dijatuhkan di tab bar / toolbar: path asli hanya bisa dibaca di preload (webUtils)
+  pathForFile: (file) => {
+    try {
+      return webUtils.getPathForFile(file);
+    } catch {
+      return "";
+    }
+  },
+  openFiles: (paths) => {
+    const list = (Array.isArray(paths) ? paths : []).filter((p) => typeof p === "string" && p);
+    if (list.length) send("tab:openfiles", list);
+  },
   suggestQuery: (text, rect, force) => send("suggest:query", text, rect, force),
   suggestMove: (dir) => send("suggest:move", dir),
   suggestFocus: () => send("suggest:focus"),
