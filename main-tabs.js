@@ -37,6 +37,7 @@ const {
 const $downloads = require("./main-downloads");
 const $main = require("./main");
 const $network = require("./main-network");
+const $shortcuts = require("./main-shortcuts");
 const $ui = require("./main-ui");
 
 const refreshActive = () => activeTab() && pushTab(activeTab());
@@ -569,6 +570,7 @@ function newTabTyping(wc, event, input) {
   if (input.type !== "keyDown" || !shared.win || shared.win.isDestroyed())
     return false;
   if (wc !== activeWC() || wc.getURL() !== NEWTAB_URL) return false;
+  if ($shortcuts.typingBlocked(wc)) return false; // dialog shortcut terbuka: ketikan untuk kolom di dialog
   const mod = input.control || input.meta;
   let text = "";
   if (!mod && !input.alt && input.key.length === 1)
@@ -634,7 +636,10 @@ function buildView(tab) {
   });
   wc.on("page-title-updated", (_e, title) => {
     if (!live()) return;
-    if (!tab.restoring) shared.stores.history.setTitle(wc.getURL(), title);
+    if (!tab.restoring) {
+      shared.stores.history.setTitle(wc.getURL(), title);
+      $shortcuts.setTitle(wc.getURL(), title);
+    }
     push();
   });
   wc.on("did-start-loading", push);
@@ -655,15 +660,18 @@ function buildView(tab) {
     tab.favicon = "";
     tab.keepAlive = false; // izin media berlaku untuk halaman ini saja
     $ui.findReset(tab);
+    $shortcuts.resetDialog(wc); // dialog shortcut di Tab Baru ikut hilang saat halaman berganti
     if (!url.startsWith(ERROR_URL)) {
       tab.errorUrl = "";
       record(url);
+      if (config.history.enabled && !tab.restoring) $shortcuts.visit(url);
     }
     push();
   });
   wc.on("page-favicon-updated", (_e, list) => {
     if (live() && list && list[0]) {
       tab.favicon = list[0];
+      $shortcuts.setFavicon(wc.getURL(), list[0]);
       push();
     }
   });

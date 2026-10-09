@@ -3,30 +3,55 @@
   <head>
     <meta charset="utf-8" />
     <meta name="color-scheme" content="dark" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; img-src data: http: https:; style-src 'self'; script-src 'self'"
+    />
     <title>New Tab</title>
-    <style>
-      html,
-      body {
-        height: 100%;
-        margin: 0;
-        background: #141418;
-        color: #e4e4ea;
-      }
-      body {
-        display: grid;
-        place-items: center;
-        font:
-          14px "Segoe UI",
-          system-ui,
-          sans-serif;
-      }
-      p {
-        color: #6c6c78;
-        letter-spacing: 0.06em;
-      }
-    </style>
+    <link rel="stylesheet" href="newtab.css" />
   </head>
   <body>
-    <p>Type an address or search above</p>
+    <nav id="shortcuts" aria-label="Shortcuts"></nav>
+    <main><p>Type an address or search above</p></main>
+
+    <div id="overlay" hidden>
+      <form
+        id="dlg"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="dlg-title"
+        novalidate
+      >
+        <h2 id="dlg-title">Edit shortcut</h2>
+        <label>
+          <span>Name</span>
+          <input
+            id="f-name"
+            maxlength="60"
+            autocomplete="off"
+            spellcheck="false"
+          />
+        </label>
+        <label>
+          <span>URL</span>
+          <input
+            id="f-url"
+            maxlength="2000"
+            autocomplete="off"
+            spellcheck="false"
+            inputmode="url"
+          />
+        </label>
+        <p id="err" role="alert"></p>
+        <div class="btns">
+          <button type="button" id="b-remove" class="danger">Remove</button>
+          <span class="grow"></span>
+          <button type="button" id="b-cancel">Cancel</button>
+          <button type="submit" id="b-done" class="primary">Done</button>
+        </div>
+      </form>
+    </div>
+
+    <script src="newtab.js"></script>
   </body>
 </html>

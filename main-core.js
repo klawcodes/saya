@@ -23,7 +23,6 @@ const shared = {
   engineIdx: 0,
 };
 
-
 // ---------------------------------------------------------------
 // Layout (piksel) — skema golden ratio: 26 : 42 = 1 : 1.615.
 // Samakan dengan --tab-h dan --bar-h di renderer/style.css.
@@ -311,7 +310,8 @@ function toUrl(input) {
 }
 
 function sendUI(channel, payload) {
-  if (shared.win && !shared.win.isDestroyed()) shared.win.webContents.send(channel, payload);
+  if (shared.win && !shared.win.isDestroyed())
+    shared.win.webContents.send(channel, payload);
 }
 
 function onUI(channel, handler) {

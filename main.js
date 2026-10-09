@@ -38,6 +38,7 @@ const {
 } = require("./main-core");
 const $downloads = require("./main-downloads");
 const $network = require("./main-network");
+const $shortcuts = require("./main-shortcuts");
 const $tabs = require("./main-tabs");
 const $ui = require("./main-ui");
 
@@ -542,11 +543,21 @@ let creditsCache = null;
 const credits = () =>
   (creditsCache ||= [...staticCredits(), ...collectCredits(__dirname)]);
 
+// Nama author dari package.json. Bisa berupa string "Nama <email> (url)" atau objek { name, email, url }
+function authorName() {
+  const a = readJson(path.join(__dirname, "package.json"))?.author;
+  const raw = typeof a === "string" ? a : a?.name;
+  return String(raw || "")
+    .replace(/\s*[<(].*$/, "")
+    .trim();
+}
+
 handleInternal("saya:about:info", () => ({
   version: app.getVersion(),
   electron: process.versions.electron,
   chromium: process.versions.chrome,
   bits: process.arch === "ia32" || process.arch === "arm" ? "32-bit" : "64-bit",
+  author: authorName(),
 }));
 handleInternal("saya:credits:list", () =>
   credits().map((c, id) => ({
@@ -584,6 +595,7 @@ app.whenReady().then(() => {
   );
   if (savedEngine >= 0) shared.engineIdx = savedEngine;
   $network.setupSession();
+  $shortcuts.init();
   $network.setupDns();
   createWindow();
   $network.setupAdblock();
@@ -591,5 +603,8 @@ app.whenReady().then(() => {
     setInterval(() => $tabs.suspendIdle(false), 30_000);
 });
 
-app.on("before-quit", () => shared.stores?.flush());
+app.on("before-quit", () => {
+  shared.stores?.flush();
+  $shortcuts.flush();
+});
 app.on("window-all-closed", () => app.quit());
