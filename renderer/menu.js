@@ -15,6 +15,7 @@
     info: "M8 2.5a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11zM8 7.4v3.6M8 5.3v.1",
     heart: "M8 13S3 10 3 6.5A2.7 2.7 0 0 1 8 5a2.7 2.7 0 0 1 5 1.5C13 10 8 13 8 13z",
     zoom: "M7 2.5a4.5 4.5 0 1 0 0 9 4.5 4.5 0 0 0 0-9zM10.3 10.3l3.2 3.2",
+    theme: "M8 2.5a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11zM8 2.5v11",
     full: "M3 6V3h3M10 3h3v3M13 10v3h-3M6 13H3v-3",
     minus: "M4 8h8",
     plus: "M8 4v8M4 8h8",
@@ -34,6 +35,14 @@
         el.className = "info";
         el.textContent = it.label;
         el.dataset.info = "1";
+      } else if (it.theme) {
+        el = document.createElement("button");
+        el.className = "item";
+        el.dataset.id = "theme:toggle";
+        el.setAttribute("role", "switch");
+        el.setAttribute("aria-checked", String(!!it.on));
+        el.title = "Dark mode for websites";
+        el.innerHTML = `<span class="ic">${svg(ICONS.theme)}</span><span class="lb">Dark mode for websites</span><span class="sw"></span>`;
       } else if (it.zoom) {
         el = document.createElement("div");
         el.className = "zoom";
@@ -63,7 +72,9 @@
     const key = JSON.stringify(items);
     if (key !== last) {
       last = key;
+      const focusId = document.activeElement?.dataset?.id; // bangun ulang tidak boleh menghilangkan fokus keyboard
       build(items);
+      if (focusId) root.querySelector(`[data-id="${focusId}"]`)?.focus();
     }
     pct.textContent = `${zoom}%`;
     api.size(root.scrollHeight + 18); // + padding atas/bawah + border

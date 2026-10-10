@@ -33,11 +33,15 @@ const {
   tabState,
   tabs,
   toUrl,
+  writeSettings,
+  SYSTEM_DARK,
 } = require("./main-core");
 const $downloads = require("./main-downloads");
 const $main = require("./main");
 const $network = require("./main-network");
 const $shortcuts = require("./main-shortcuts");
+const $toast = require("./main-toast");
+const $linkstatus = require("./main-linkstatus");
 const $ui = require("./main-ui");
 
 const refreshActive = () => activeTab() && pushTab(activeTab());
@@ -572,24 +576,97 @@ function newTabTyping(wc, event, input) {
   if (wc !== activeWC() || wc.getURL() !== NEWTAB_URL) return false;
   if ($shortcuts.typingBlocked(wc)) return false; // dialog shortcut terbuka: ketikan untuk kolom di dialog
   const mod = input.control || input.meta;
-  let text = "";
-  if (!mod && !input.alt && input.key.length === 1)
-    text = input.key; // huruf, angka, simbol, spasi
-  else if (mod && !input.alt && !input.shift && input.key.toLowerCase() === "v")
-    text = clipboard
-      .readText()
-      .replace(/[\r\n]+/g, " ")
-      .slice(0, 2000); // Ctrl+V = tempel ke address bar
-  if (!text) return false;
-  event.preventDefault();
-  shared.win.webContents.focus();
-  sendUI("address:type", text);
-  return true;
+  const toAddress = (text) => {
+    if (!text || !shared.win || shared.win.isDestroyed()) return;
+    shared.win.webContents.focus();
+    sendUI("address:type", text);
+  };
+  if (!mod && !input.alt && input.key.length === 1) {
+    // huruf, angka, simbol, spasi
+    event.preventDefault();
+    toAddress(input.key);
+    return true;
+  }
+  if (mod && !input.alt && !input.shift && input.key.toLowerCase() === "v") {
+    // Ctrl+V = tempel ke address bar. Hasil readText() tidak diasumsikan string (bisa Promise / kosong
+    // di beberapa versi Electron atau saat clipboard dikunci aplikasi lain), dan kegagalan tidak boleh jadi error.
+    const clean = (t) =>
+      typeof t === "string" ? t.replace(/[\r\n]+/g, " ").slice(0, 2000) : "";
+    let raw;
+    try {
+      raw = clipboard.readText();
+    } catch {
+      return false;
+    }
+    if (raw && typeof raw.then === "function") {
+      event.preventDefault();
+      raw.then((t) => toAddress(clean(t))).catch(() => {});
+      return true;
+    }
+    const text = clean(raw);
+    if (!text) return false;
+    event.preventDefault();
+    toAddress(text);
+    return true;
+  }
+  return false;
 }
 
 // ---------------------------------------------------------------
 // Tab
 // ---------------------------------------------------------------
+// ---------------------------------------------------------------
+// Tema situs (dark/light), hanya untuk halaman web; halaman internal (file://) selalu gelap.
+// Dark : situs melihat prefers-color-scheme: dark (bawaan) DAN Chromium "auto dark mode" menyala. Situs yang
+//        dark mode-nya setengah jadi (latar gelap tapi panel putih / teks gelap) dibereskan: warna terang
+//        dibalik jadi gelap, teks gelap jadi terang, gambar/video tidak disentuh. Bagian yang sudah gelap
+//        dan berwarna (header merah dsb.) dibiarkan.
+// Off  : browser tidak memaksa apa pun. Tanpa auto dark mode; prefers-color-scheme mengikuti skema OS yang asli
+//        (bukan paksaan terang/gelap), jadi tiap situs memakai tema pilihannya sendiri (toggle di situs, dsb.).
+// Dipasang lewat CDP (sama seperti emulasi DevTools), jadi berlaku langsung tanpa memuat ulang halaman.
+// ---------------------------------------------------------------
+async function applyTheme(tab, url) {
+  const wc = tab?.view?.webContents;
+  if (!wc || wc.isDestroyed()) return;
+  const web = isWeb(url || wc.getURL());
+  const dark = config.darkWeb !== false;
+  // Warna dasar halaman: situs yang tidak melukis latarnya sendiri (Pinterest, Erafone di area tertentu)
+  // menampilkan warna ini. Dark web mati dan OS terang = putih seperti browser biasa; selain itu = BG.
+  try {
+    tab.view.setBackgroundColor(web && !dark && !SYSTEM_DARK ? "#ffffff" : BG);
+  } catch {}
+  try {
+    if (!wc.debugger.isAttached()) wc.debugger.attach("1.3");
+    const send = (m, p) => wc.debugger.sendCommand(m, p);
+    // Tanpa parameter "enabled" = override dihapus
+    await send(
+      "Emulation.setAutoDarkModeOverride",
+      web && dark ? { enabled: true } : {},
+    );
+    // Dark web mati: ikuti skema OS asli, tidak dipaksa terang. Dark web nyala / halaman internal: bawaan (gelap).
+    await send("Emulation.setEmulatedMedia", {
+      features: [
+        {
+          name: "prefers-color-scheme",
+          value: web && !dark ? (SYSTEM_DARK ? "dark" : "light") : "",
+        },
+      ],
+    });
+  } catch (err) {
+    console.warn("[tema] gagal mengatur tema situs:", err.message);
+  }
+}
+
+function setDarkWeb(on) {
+  config.darkWeb = !!on;
+  try {
+    writeSettings({ darkWeb: config.darkWeb });
+  } catch (err) {
+    console.warn("[tema] gagal menyimpan pilihan:", err.message);
+  }
+  for (const tab of tabs.values()) if (tab.view) applyTheme(tab);
+}
+
 // Argumen untuk preload halaman: beri tahu apakah shim Chrome berlaku di semua situs (juga di iframe)
 function shimPrefs() {
   return config.identity.chromeShim === "all"
@@ -633,6 +710,19 @@ function buildView(tab) {
   wc.on("did-start-navigation", (e) => {
     if (e.isMainFrame && live() && !wc.debugger.isAttached())
       $network.spoofUA(wc); // debugger bisa terlepas (DevTools, crash)
+  });
+  // Tema situs dipasang sedini mungkin (awal navigasi) dan dipastikan lagi saat navigasi selesai di-commit
+  wc.on("did-start-navigation", (e) => {
+    if (e.isMainFrame && live()) applyTheme(tab, e.url);
+  });
+  wc.on("did-navigate", (_e, url) => {
+    if (live()) applyTheme(tab, url);
+  });
+  // Tujuan link yang sedang di-hover (kosong = kursor pergi) -> kotak kecil di kiri bawah
+  wc.on("update-target-url", (_e, url) => {
+    if (!live() || tab.id !== shared.activeId) return;
+    if (url) $linkstatus.show(url);
+    else $linkstatus.hide();
   });
   wc.on("page-title-updated", (_e, title) => {
     if (!live()) return;
@@ -769,15 +859,43 @@ function buildView(tab) {
       return { action: "deny" };
     },
   );
-  wc.on("did-create-window", (child) => setupPopupWindow(child));
+  wc.on("did-create-window", (child) => setupPopupWindow(child, wc));
   return view;
 }
 
 // Jendela popup (login, dsb.): identitas browser sama dengan tab; link baru di dalamnya dibuka sebagai tab
-function setupPopupWindow(child) {
+//
+// Alur login (mis. "Add account" di Google Drive): setelah login selesai, Google mengarahkan popup ke halaman
+// situs asal. Kalau halaman itu tidak menutup dirinya sendiri, popup tertinggal menampilkan situsnya. Di sini
+// popup yang sudah pernah melewati halaman login lalu mendarat di halaman biasa ditutup (setelah jeda singkat,
+// supaya callback OAuth sempat memanggil postMessage / window.close), dan tab asal dimuat ulang agar memakai akun baru.
+function setupPopupWindow(child, opener) {
   const cwc = child.webContents;
   child.setMenuBarVisibility(false);
   $network.spoofUA(cwc);
+
+  let sawAuth = false;
+  let doneTimer = null;
+  const alive = () => !child.isDestroyed() && !cwc.isDestroyed();
+  const onNav = (url) => {
+    if (!alive() || !isWeb(url)) return;
+    clearTimeout(doneTimer);
+    if ($network.isAuthHost(url)) {
+      sawAuth = true;
+      return;
+    }
+    if (!sawAuth) return; // popup biasa (bukan alur login): biarkan
+    doneTimer = setTimeout(() => {
+      if (!alive()) return; // sudah menutup dirinya sendiri
+      if (opener && !opener.isDestroyed()) opener.reload();
+      child.close();
+    }, 2000);
+  };
+  cwc.on("did-navigate", (_e, url) => onNav(url));
+  cwc.on("did-redirect-navigation", (e) => {
+    if (e.isMainFrame) onNav(e.url);
+  });
+  child.on("closed", () => clearTimeout(doneTimer));
   cwc.on("did-start-navigation", (e) => {
     if (e.isMainFrame && !cwc.isDestroyed() && !cwc.debugger.isAttached())
       $network.spoofUA(cwc);
@@ -872,6 +990,8 @@ function activateTab(id) {
   else next.view.webContents.focus();
   pushTab(next);
   sendUI("tab:active", id);
+  $linkstatus.hide();
+  $toast.raise(); // view tab baru tidak boleh menutupi notifikasi
   scheduleSave();
 }
 
@@ -1201,6 +1321,7 @@ Object.assign(module.exports, {
   rsp,
   saveSession,
   scheduleSave,
+  setDarkWeb,
   startTabs,
   suspendIdle,
   tabByWcId,

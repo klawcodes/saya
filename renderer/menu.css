@@ -38,6 +38,12 @@ body { border: 1px solid var(--line); border-radius: 13px; }
 .item .ac { color: var(--fg-faint); font-size: 12px; line-height: 1.4; }
 .ic { flex: none; width: 16px; height: 16px; color: var(--fg-dim); }
 .ic svg, .zb svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
+/* Switch (Dark mode for websites) */
+.sw { flex: none; position: relative; width: 28px; height: 16px; border-radius: 8px; background: var(--btn-hover); transition: background 120ms; }
+.sw::after { content: ""; position: absolute; top: 3px; left: 3px; width: 10px; height: 10px; border-radius: 50%; background: var(--fg-dim); transition: transform 120ms, background 120ms; }
+.item[aria-checked="true"] .sw { background: var(--accent); }
+.item[aria-checked="true"] .sw::after { transform: translateX(12px); background: #fff; }
+@media (prefers-reduced-motion: reduce) { .sw, .sw::after { transition: none; } }
 .info { height: 26px; display: flex; align-items: center; padding: 0 13px 0 42px; color: var(--fg-faint); font-size: 12px; line-height: 1.4; }
 .sep { height: 1px; margin: 5px 8px; background: var(--line); }
 

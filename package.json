@@ -1,12 +1,14 @@
 {
   "name": "saya",
   "productName": "Saya",
-  "version": "0.3.70-beta",
+  "version": "0.4.10-beta",
   "description": "Saya, a lightweight Chromium browser (Electron) with a built-in ad blocker, secure DNS, and tab sleeping",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
     "build": "electron-packager . Saya --platform=win32 --arch=x64 --out=dist --overwrite --ignore=\"^/(dist|installer|\\.git)($|/)\" --icon=icon.ico --win32metadata.ProductName=Saya --win32metadata.FileDescription=Saya --win32metadata.InternalName=Saya --win32metadata.OriginalFilename=Saya.exe --win32metadata.CompanyName=\"Commonly Works\" --app-copyright=\"Copyright (c) Commonly Works\"",
+    "build:win": "npm run build",
+    "build:linux": "electron-builder --linux",
     "clear-icon-cache": "taskkill /IM explorer.exe /F & del /A /Q \"%localappdata%\\IconCache.db\" & del /A /F /Q \"%localappdata%\\Microsoft\\Windows\\Explorer\\iconcache*\" & start explorer.exe"
   },
   "dependencies": {
@@ -15,8 +17,37 @@
   },
   "devDependencies": {
     "electron": "^44.5.1",
-    "@electron/packager": "^20.3.0"
+    "@electron/packager": "^20.3.0",
+    "electron-builder": "^26.0.0"
   },
-  "author": "Commonly Works",
-  "license": "MIT"
+  "author": {
+    "name": "Commonly Works",
+    "email": "fromrevenger@gmail.com"
+  },
+  "license": "MIT",
+  "homepage": "https://github.com/klawcodes/saya",
+  "build": {
+    "appId": "com.saya.browser",
+    "productName": "Saya",
+    "directories": {
+      "output": "dist-linux"
+    },
+    "files": [
+      "**/*",
+      "!dist/**",
+      "!dist-linux/**",
+      "!installer/**"
+    ],
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb",
+        "tar.gz"
+      ],
+      "icon": "icon.png",
+      "category": "Network;WebBrowser",
+      "executableName": "saya",
+      "synopsis": "Lightweight Chromium browser with ad blocker and secure DNS"
+    }
+  }
 }

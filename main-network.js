@@ -557,6 +557,9 @@ function isAuthTarget(u, from) {
   }
 }
 
+// Apakah host termasuk penyedia login (Google, Microsoft, Apple, dst.)
+const isAuthHost = (u) => inSet(AUTH_POPUP_HOSTS, hostOf(u));
+
 // window.open(url, name, "width=500,height=600") = popup. Fitur "noopener,noreferrer" saja bukan popup:
 // itu hanya memutus window.opener dan sering dipakai untuk link biasa.
 function wantsPopupWindow(features) {
@@ -859,6 +862,7 @@ Object.assign(module.exports, {
   hostOf,
   inSet,
   installClientHints,
+  isAuthHost,
   isAuthTarget,
   isNamedWindow,
   isSitePaused,

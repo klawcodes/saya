@@ -49,7 +49,11 @@ const PAGE_NAMES = new Map(
   Object.entries(PAGES).map(([name, url]) => [url, name]),
 );
 const PAGE_PRELOAD = path.join(__dirname, "pagepreload.js");
-const APP_ICON = path.join(__dirname, "icon.ico"); // taruh logo (format .ico) di sini; dipakai jendela & build
+// Windows memakai icon.ico, Linux memakai icon.png (disarankan 512x512). Dipakai jendela, logo tab bar & build.
+const APP_ICON = path.join(
+  __dirname,
+  process.platform === "win32" ? "icon.ico" : "icon.png",
+);
 
 // ---------------------------------------------------------------
 // Config (config.json di folder proyek)
@@ -97,6 +101,7 @@ const DEFAULT_CONFIG = {
     chromeShim: "all", // 'all' = lengkapi window.chrome dll. di semua situs (mengurangi salah deteksi bot); 'google' = hanya Google/YouTube
     clientHints: true, // UA + Client Hints ala Chrome lewat CDP (false = pakai bawaan Electron; untuk uji coba login Google)
   },
+  darkWeb: true, // true = situs ditampilkan gelap (prefers-color-scheme dark + auto dark mode Chromium untuk panel putih); false = browser tidak memaksa apa pun (tidak gelap, tidak terang): situs memakai tema pilihannya sendiri / mengikuti OS. Bisa diganti lewat menu titik tiga
   hardwareAcceleration: true,
   restoreTabs: true, // buka kembali tab terakhir saat Saya dijalankan
   adblock: {
@@ -212,6 +217,7 @@ function writeSettings(patch) {
     config.dns.servers = s.dnsServers;
   if (CACHE_LIMITS.includes(s.cacheLimitMB))
     config.cacheLimitMB = s.cacheLimitMB;
+  if (typeof s.darkWeb === "boolean") config.darkWeb = s.darkWeb;
 }
 const cacheLimitAtStart = config.cacheLimitMB | 0; // perubahan batas baru berlaku setelah Saya dibuka ulang
 if (cacheLimitAtStart > 0)
@@ -269,7 +275,11 @@ try {
 }
 if (process.platform === "win32") app.setAppUserModelId("com.saya.browser"); // ikon & pengelompokan taskbar
 
-nativeTheme.themeSource = "dark"; // hanya dark mode (UI + prefers-color-scheme untuk situs)
+// UI browser selalu gelap. Tema situs diatur per tab lewat CDP (applyTheme di main-tabs.js), bukan lewat nativeTheme.
+// Skema warna OS dibaca SEBELUM themeSource dipaksa gelap: dipakai saat "Dark web" dimatikan, supaya situs
+// melihat preferensi OS yang asli (bukan dipaksa terang/gelap oleh browser) dan memakai tema pilihannya sendiri.
+const SYSTEM_DARK = nativeTheme.shouldUseDarkColors;
+nativeTheme.themeSource = "dark";
 if (!config.hardwareAcceleration) app.disableHardwareAcceleration();
 
 // ---------------------------------------------------------------
@@ -401,6 +411,7 @@ Object.assign(module.exports, {
   PAGES,
   PAGE_PRELOAD,
   RENDERER_DIR,
+  SYSTEM_DARK,
   TAB_BAR_H,
   activeTab,
   activeWC,

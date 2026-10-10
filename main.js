@@ -40,6 +40,8 @@ const $downloads = require("./main-downloads");
 const $network = require("./main-network");
 const $shortcuts = require("./main-shortcuts");
 const $tabs = require("./main-tabs");
+const $toast = require("./main-toast");
+const $linkstatus = require("./main-linkstatus");
 const $ui = require("./main-ui");
 
 // Hanya satu Saya yang berjalan; link/perintah dari instance kedua dibuka sebagai tab baru
@@ -115,6 +117,10 @@ function createWindow() {
     $downloads.dlpHide();
     $ui.mpHide();
   });
+  shared.win.on("resize", $toast.layout);
+  shared.win.on("resize", $linkstatus.hide);
+  shared.win.on("maximize", $toast.layout);
+  shared.win.on("unmaximize", $toast.layout);
   shared.win.on("resize", $tabs.scheduleSave);
   shared.win.on("move", $tabs.scheduleSave);
   shared.win.on("close", () => {
@@ -128,6 +134,8 @@ function createWindow() {
   shared.win.on("enter-full-screen", $tabs.layout);
   shared.win.on("leave-full-screen", $tabs.layout);
   shared.win.on("closed", () => {
+    $toast.destroy();
+    $linkstatus.destroy();
     shared.win = null;
     $ui.sg.view = null;
     $ui.sg.open = false;
@@ -576,6 +584,16 @@ handleInternal("saya:open", (name) => {
   if (typeof name === "string" && Object.hasOwn(PAGES, name))
     $tabs.openInternal(name);
   return true;
+});
+
+// Error tak terduga di proses utama: jangan tampilkan dialog "A JavaScript error occurred" bawaan Electron
+// (mendaftarkan handler ini otomatis menekannya). Dicatat ke error.log dan ditampilkan sebagai kartu kecil di kanan atas.
+process.on("uncaughtException", (err) => {
+  try {
+    $toast.report(err, "main");
+  } catch (e) {
+    console.error("[main]", err, e);
+  }
 });
 
 // Kalau scriptlet (cosmetic: true) gagal di sebuah situs, cukup catat satu baris

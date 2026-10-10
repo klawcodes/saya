@@ -70,6 +70,7 @@ function mpModel() {
         disabled: closedTabs.length === 0,
       },
       { sep: true },
+      { theme: true, on: config.darkWeb !== false },
       { zoom: true },
       { sep: true },
       { id: "sleep", icon: "moon", label: "Sleep background tabs" },
@@ -209,6 +210,10 @@ function mpAct(id) {
   if (id === "zoom:in" || id === "zoom:out") {
     $tabs.zoomStep(wc, id === "zoom:in" ? 1 : -1);
     return mpPaint(); // menu tetap terbuka supaya bisa ditekan berulang
+  }
+  if (id === "theme:toggle") {
+    $tabs.setDarkWeb(config.darkWeb === false);
+    return mpPaint(); // menu tetap terbuka supaya hasilnya langsung kelihatan di halaman
   }
   if (id === "zoom:reset") {
     if (wc && !wc.isDestroyed()) wc.setZoomFactor(1);
