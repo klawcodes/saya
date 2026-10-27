@@ -561,7 +561,7 @@ function tabItems(q, limit) {
       kind: "tab",
       icon: "tab",
       tabId: t.id,
-      favicon: safeFav(t.favicon),
+      favicon: safeFav(s.favicon || t.favicon),
       title: s.title || s.url,
       sub: hostOf(s.url),
       sec: needle ? "Open Tabs" : "Recent Tabs",
@@ -1139,7 +1139,7 @@ function sboPush() {
       list.push({
         id: t.id,
         title: s.title || s.url || "New Tab",
-        favicon: safeFav(t.favicon),
+        favicon: safeFav(s.favicon || t.favicon),
         active: t.id === shared.activeId,
         suspended: !!t.suspended,
         loading: !!s.loading,

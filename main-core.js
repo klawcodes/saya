@@ -1,7 +1,7 @@
 // main-core.js — Konfigurasi, pengaturan, mesin pencari, state bersama (shared), dan util dasar.
 // Modul ini TIDAK boleh require modul main-* lain (dimuat paling awal).
 
-const { app, ipcMain, nativeTheme } = require("electron");
+const { app, ipcMain, nativeImage, nativeTheme } = require("electron");
 const path = require("path");
 const fs = require("fs");
 const { pathToFileURL } = require("url");
@@ -398,6 +398,22 @@ function handleInternal(channel, handler) {
 const activeTab = () => tabs.get(shared.activeId);
 const activeWC = () => activeTab()?.view?.webContents;
 
+// Ikon tab untuk halaman internal (saya://settings, history, dst.): renderer/logo.png, diperkecil jadi
+// data URL sekali saja supaya ringan dikirim lewat IPC. Kosong kalau logo.png tidak ada.
+let internalFav;
+function internalFavicon() {
+  if (internalFav !== undefined) return internalFav;
+  internalFav = "";
+  try {
+    const img = nativeImage.createFromPath(path.join(RENDERER_DIR, "logo.png"));
+    if (!img.isEmpty())
+      internalFav = img
+        .resize({ width: 32, height: 32, quality: "best" })
+        .toDataURL();
+  } catch {}
+  return internalFav;
+}
+
 function tabState(tab) {
   if (!tab) return null;
   let s;
@@ -419,9 +435,10 @@ function tabState(tab) {
       canGoForward: wc.navigationHistory.canGoForward(),
     };
   }
+  const internal = /^saya:\/\//i.test(s.url || "");
   return {
     ...s,
-    favicon: tab.favicon,
+    favicon: (internal && internalFavicon()) || tab.favicon,
     suspended: tab.suspended,
     audible: !tab.suspended && tab.view.webContents.isCurrentlyAudible(),
     muted: !!tab.muted,
