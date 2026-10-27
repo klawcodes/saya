@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; script-src 'self'" />
+  <title>Dialog</title>
+  <link rel="stylesheet" href="dialog.css" />
+</head>
+<body>
+  <div id="drag"></div>
+  <div id="scrim" hidden>
+    <section id="card" role="alertdialog" aria-modal="true" aria-labelledby="title" aria-describedby="body">
+      <header id="head">
+        <div id="icon" aria-hidden="true"></div>
+        <div id="titles">
+          <h1 id="title"></h1>
+          <p id="sub" hidden></p>
+        </div>
+      </header>
+      <div id="body"></div>
+      <label id="check" hidden><input type="checkbox" id="checkbox" /><span id="checkLabel"></span></label>
+      <footer id="foot"></footer>
+    </section>
+  </div>
+  <script src="dialog.js"></script>
+</body>
+</html>

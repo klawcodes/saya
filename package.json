@@ -1,7 +1,7 @@
 {
   "name": "saya",
   "productName": "Saya",
-  "version": "0.4.10-beta",
+  "version": "0.5.0",
   "description": "Saya, a lightweight Chromium browser (Electron) with a built-in ad blocker, secure DNS, and tab sleeping",
   "main": "main.js",
   "scripts": {

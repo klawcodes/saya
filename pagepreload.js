@@ -82,12 +82,93 @@ function googleShim() {
   } catch {}
 }
 
+// Dokumen PDF (viewer bawaan Chromium): jangan pasang shim maupun scriptlet di frame-nya.
+// Frame ini berasal dari URL http(s) PDF-nya, jadi tanpa pengecualian ini ikut kena injeksi (PDF lokal file:// tidak).
+let isPdfDoc = false;
+try {
+  isPdfDoc = /^application\/pdf/i.test(document.contentType || "");
+} catch {}
+
+// alert() / confirm() / prompt() dan navigator.permissions.query() dijalankan di "main world" halaman.
+// Jembatan ke proses utama dipasang lewat contextBridge dengan nama acak, lalu dihapus dari window setelah
+// diambil (kalau penghapusan ditolak, nama acaknya tetap tidak bisa ditebak halaman).
+// Fungsi ini diserialisasi, jadi harus mandiri.
+function dialogShim(KEY) {
+  const b = window[KEY];
+  try {
+    delete window[KEY];
+  } catch {}
+  if (!b) return;
+  const put = (obj, name, fn) => {
+    try {
+      Object.defineProperty(obj, name, {
+        value: fn,
+        writable: true,
+        configurable: true,
+        enumerable: true,
+      });
+    } catch {}
+  };
+  const text = (args) => (args.length ? String(args[0]) : "");
+  put(window, "alert", function alert() {
+    try {
+      b.dialog("alert", text(arguments), "");
+    } catch {}
+  });
+  put(window, "confirm", function confirm() {
+    try {
+      return b.dialog("confirm", text(arguments), "") === true;
+    } catch {
+      return false;
+    }
+  });
+  put(window, "prompt", function prompt() {
+    try {
+      const r = b.dialog(
+        "prompt",
+        text(arguments),
+        arguments.length > 1 && arguments[1] != null ? String(arguments[1]) : "",
+      );
+      return typeof r === "string" ? r : null;
+    } catch {
+      return null;
+    }
+  });
+
+  // Status izin sesuai pilihan yang tersimpan (Electron hanya tahu "diizinkan" atau "ditolak")
+  const names = ["geolocation", "camera", "microphone", "clipboard-read"];
+  if (navigator.permissions && navigator.permissions.query) {
+    const q = navigator.permissions.query.bind(navigator.permissions);
+    put(navigator.permissions, "query", function query(d) {
+      const n = d && d.name;
+      if (names.indexOf(n) < 0) return q(d);
+      let state;
+      try {
+        state = b.perm(n);
+      } catch {
+        return q(d);
+      }
+      return Promise.resolve({
+        name: n,
+        state,
+        onchange: null,
+        addEventListener() {},
+        removeEventListener() {},
+        dispatchEvent() {
+          return false;
+        },
+      });
+    });
+  }
+}
+
 let shimAll = false;
 try {
   shimAll = (process.argv || []).includes("--saya-shim=all");
 } catch {}
 
 if (
+  !isPdfDoc &&
   /^https?:$/.test(location.protocol) &&
   (shimAll || /(^|\.)(google\.com|youtube\.com)$/.test(location.hostname))
 ) {
@@ -101,7 +182,7 @@ if (
 // Scriptlet ad blocker (uBO): diminta sinkron ke main.js dan dijalankan di main world SEBELUM skrip halaman,
 // supaya patch fetch/XHR/JSON (mis. IDLIX, YouTube) sudah terpasang saat halaman membuat request pertamanya.
 // webFrame.executeJavaScript tidak terikat CSP halaman. Halaman pengecualian (login dsb.) mendapat daftar kosong.
-if (/^https?:$/.test(location.protocol)) {
+if (!isPdfDoc && /^https?:$/.test(location.protocol)) {
   try {
     const scripts = ipcRenderer.sendSync("saya:scriptlets");
     if (Array.isArray(scripts)) {
@@ -109,6 +190,25 @@ if (/^https?:$/.test(location.protocol)) {
         webFrame.executeJavaScript(code).catch(() => {});
     }
   } catch {}
+}
+
+// Dialog & status izin kustom (halaman web biasa; dokumen PDF dan halaman internal dilewati)
+if (!isPdfDoc && /^https?:$/.test(location.protocol)) {
+  try {
+    const KEY = "__s" + Math.random().toString(36).slice(2);
+    contextBridge.exposeInMainWorld(KEY, {
+      dialog: (type, message, def) =>
+        ipcRenderer.sendSync("saya:dialog", {
+          type: String(type),
+          message: String(message),
+          def: String(def),
+        }),
+      perm: (name) => ipcRenderer.sendSync("saya:permstate", String(name)),
+    });
+    contextBridge.executeInMainWorld({ func: dialogShim, args: [KEY] });
+  } catch (err) {
+    console.warn("[saya] dialog shim gagal:", err && err.message);
+  }
 }
 
 if (location.protocol === "file:") {
@@ -130,6 +230,7 @@ if (location.protocol === "file:") {
       ipcRenderer.on("saya:downloads:update", (_e, items) => cb(items)),
     open: (name) => call("saya:open", name),
     settingsGet: () => call("saya:settings:get"),
+    settingsTabLayout: (mode) => call("saya:settings:tabLayout", mode), // "sidebar" | "top"; tanpa argumen = baca saja
     settingsDns: (mode, servers) => call("saya:settings:dns", mode, servers),
     settingsCacheLimit: (mb) => call("saya:settings:cacheLimit", mb),
     cacheSizes: () => call("saya:cache:sizes"),

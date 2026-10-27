@@ -5,13 +5,12 @@ const EVENTS = new Set([
   "tab:update",
   "tab:active",
   "tab:closed",
-  "focus-address",
   "adblock:state",
   "adblock:count",
   "engine:changed",
-  "suggest:fill",
   "downloads:badge",
-  "address:type",
+  "sidebar:state",
+  "layout:state",
 ]);
 
 const send = (channel, ...args) => ipcRenderer.send(channel, ...args);
@@ -33,7 +32,16 @@ contextBridge.exposeInMainWorld("browserAPI", {
   site: () => send("site:open"),
   downloadsToggle: (rect) => send("downloads:toggle", rect),
   downloadsAnchor: (rect) => send("downloads:anchor", rect),
-  // File yang dijatuhkan di tab bar / toolbar: path asli hanya bisa dibaca di preload (webUtils)
+  // Command palette (menggantikan mengetik di address bar) & sidebar auto-hide
+  openPalette: (text) => send("palette:open", String(text ?? "")),
+  sidebarToggle: () => send("sidebar:toggle"),
+  splitTab: (id) => send("split:tab", id),
+  tabMenu: (id) => send("tabmenu:open", Number(id) || 0),
+  sidebarHover: (on) => send("sidebar:hover", !!on),
+  // Resize sidebar: final=false saat drag berjalan, true saat dilepas (disimpan & snap ke mode icon-only)
+  sidebarResize: (w, final) => send("sidebar:resize", Number(w) || 0, !!final),
+  sidebarResizeToggle: () => send("sidebar:resize-toggle"),
+  // File yang dijatuhkan di sidebar / toolbar: path asli hanya bisa dibaca di preload (webUtils)
   pathForFile: (file) => {
     try {
       return webUtils.getPathForFile(file);
@@ -45,10 +53,6 @@ contextBridge.exposeInMainWorld("browserAPI", {
     const list = (Array.isArray(paths) ? paths : []).filter((p) => typeof p === "string" && p);
     if (list.length) send("tab:openfiles", list);
   },
-  suggestQuery: (text, rect, force) => send("suggest:query", text, rect, force),
-  suggestMove: (dir) => send("suggest:move", dir),
-  suggestFocus: () => send("suggest:focus"),
-  suggestBlur: () => send("suggest:blur"),
   on: (channel, callback) => {
     if (!EVENTS.has(channel)) return;
     ipcRenderer.on(channel, (_event, payload) => callback(payload));

@@ -2,13 +2,20 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; script-src 'self'">
-  <title>Suggestions</title>
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data: http: https:; style-src 'self'; script-src 'self'">
+  <title>Command palette</title>
   <link rel="stylesheet" href="suggest.css">
 </head>
 <body>
+  <header id="top">
+    <span class="mag"><svg viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5L14 14"/></svg></span>
+    <input id="q" type="text" spellcheck="false" autocomplete="off" placeholder="Search or enter address">
+  </header>
   <ul id="list" role="listbox"></ul>
-  <footer id="engines"></footer>
+  <footer id="foot">
+    <div id="engines"></div>
+    <div id="act"><span id="act-text"></span><kbd>&#9166;</kbd></div>
+  </footer>
   <script src="suggest.js"></script>
 </body>
 </html>

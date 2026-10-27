@@ -17,6 +17,8 @@ const {
   APP_ICON,
   BG,
   CHROME_H,
+  PAGE_RADIUS,
+  pageArea,
   ERROR_URL,
   INTERNAL_BASE,
   NEWTAB_URL,
@@ -36,6 +38,7 @@ const {
   writeSettings,
   SYSTEM_DARK,
 } = require("./main-core");
+const $dialog = require("./main-dialog");
 const $downloads = require("./main-downloads");
 const $main = require("./main");
 const $network = require("./main-network");
@@ -44,25 +47,56 @@ const $toast = require("./main-toast");
 const $linkstatus = require("./main-linkstatus");
 const $ui = require("./main-ui");
 
+const originOf = (u) => {
+  try {
+    return new URL(u).origin;
+  } catch {
+    return "";
+  }
+};
+// Hanya http(s) / data:image yang boleh dipakai UI; data URI raksasa dibuang
+const validFav = (f) =>
+  typeof f === "string" && f.length <= 65536 && /^(https?:\/\/|data:image\/)/i.test(f);
+
 const refreshActive = () => activeTab() && pushTab(activeTab());
 
 function layout() {
   layoutViews();
   $ui.findLayout();
+  $ui.sboLayout(); // sidebar hover (overlay) selalu di atas view halaman
+  $dialog.layout(); // dialog modal menutupi seluruh jendela, di atas semuanya
 }
 
 function layoutViews() {
   if (!shared.win || shared.win.isDestroyed()) return;
-  const [w, h] = shared.win.getContentSize();
+  const [cw, ch] = shared.win.getContentSize();
   const tab = activeTab();
   const view = tab?.view;
   if (!view) return;
-  const top = shared.htmlFullscreen ? 0 : CHROME_H;
-  const H = Math.max(0, h - top);
+  // Kartu halaman: dikurangi toolbar atas, bingkai, dan sidebar (kalau terbuka); lihat pageArea di main-core.js
+  const { x: ox, y: top, width: w, height: H } = pageArea(cw, ch);
+  try {
+    view.setBorderRadius(shared.htmlFullscreen ? 0 : PAGE_RADIUS);
+  } catch {}
+  try {
+    view.setVisible(true);
+  } catch {}
+  // Split view: dua tab berdampingan (lihat blok "Split view" di bawah)
+  const mate = splitPair(tab);
+  if (mate) {
+    layoutSplit(tab, mate, { ox, top, w, H });
+    return;
+  }
+  splitUiHide();
+  const hidden = tabs.get(splitPartner(tab.id));
+  try {
+    if (hidden?.view && !hidden.view.webContents.isDestroyed())
+      hidden.view.setVisible(false); // pasangan split tidak boleh menimpa tab aktif (mis. saat DevTools terbuka)
+  } catch {}
   const dt = tab.devtools;
   if (dt) dt.setVisible(!shared.htmlFullscreen);
   if (!dt || shared.htmlFullscreen) {
-    placePage(tab, { x: 0, y: top, width: w, height: H });
+    placePage(tab, { x: ox, y: top, width: w, height: H });
     devUiHide();
     return;
   }
@@ -74,27 +108,27 @@ function layoutViews() {
   const hh = DEV_HANDLE / 2;
   if (right) {
     const dw = Math.round(w * dev.ratio);
-    placePage(tab, { x: 0, y: top, width: w - dw, height: H });
+    placePage(tab, { x: ox, y: top, width: w - dw, height: H });
     dt.setBounds({
-      x: w - dw,
+      x: ox + w - dw,
       y: top + bar,
       width: dw,
       height: Math.max(0, H - bar),
     });
     devUiPlace(
       dt,
-      { x: w - dw, y: top, width: dw, height: bar },
-      { x: w - dw - hh, y: top, width: DEV_HANDLE, height: H },
+      { x: ox + w - dw, y: top, width: dw, height: bar },
+      { x: ox + w - dw - hh, y: top, width: DEV_HANDLE, height: H },
     );
   } else {
     const dh = Math.round(H * dev.ratio);
     const y = top + H - dh;
-    placePage(tab, { x: 0, y: top, width: w, height: H - dh });
-    dt.setBounds({ x: 0, y: y + bar, width: w, height: Math.max(0, dh - bar) });
+    placePage(tab, { x: ox, y: top, width: w, height: H - dh });
+    dt.setBounds({ x: ox, y: y + bar, width: w, height: Math.max(0, dh - bar) });
     devUiPlace(
       dt,
-      { x: 0, y, width: w, height: bar },
-      { x: 0, y: y - hh, width: w, height: DEV_HANDLE },
+      { x: ox, y, width: w, height: bar },
+      { x: ox, y: y - hh, width: w, height: DEV_HANDLE },
     );
   }
 }
@@ -263,10 +297,10 @@ function devDrag() {
   if (!shared.win || shared.win.isDestroyed()) return;
   const pt = screen.getCursorScreenPoint();
   const cb = shared.win.getContentBounds();
-  const H = Math.max(1, cb.height - CHROME_H);
+  const A = pageArea(cb.width, cb.height);
   const frac = dev.right
-    ? (cb.x + cb.width - pt.x) / cb.width
-    : (cb.y + cb.height - pt.y) / H;
+    ? (cb.x + A.x + A.width - pt.x) / Math.max(1, A.width)
+    : (cb.y + A.y + A.height - pt.y) / Math.max(1, A.height);
   dev.ratio = Math.min(DEV_MAX, Math.max(DEV_MIN, frac));
   layout();
 }
@@ -561,10 +595,241 @@ ipcMain.on("respui", (e, act, val) => {
   layout();
 });
 
+// ---------------------------------------------------------------
+// Split view (ala Arc): dua tab berdampingan di area halaman, dipisah pegangan yang bisa digeser.
+// State: shared.split = { ids: [kiri, kanan], ratio } (satu grup; null = tidak ada). Tab aktif = panel yang
+// terakhir diklik (toolbar, Ctrl+L dsb. mengikuti panel itu). Bar tipis di bawah halaman menandai panel aktif.
+// Cara pakai: Ctrl+\ (toggle), Ctrl+klik tab di sidebar, klik kanan link > "Open link in split view",
+// atau menu titik tiga / command palette. Klik dua kali pegangan = kembali 50:50.
+// ---------------------------------------------------------------
+const SPLIT_GAP = 8;
+const SPLIT_HANDLE = 12;
+const SPLIT_MIN = 0.15;
+const spl = { handle: null, bar: null, dragging: false, applied: "" };
+
+const SPLIT_HANDLE_HTML = `<!doctype html><meta charset="utf-8"><style>
+html,body{margin:0;height:100%;background:transparent;overflow:hidden}
+[data-drag]{position:fixed;inset:0;cursor:col-resize;display:grid;place-items:center}
+i{width:4px;height:40px;border-radius:2px;background:#34343f;transition:background 120ms,height 120ms}
+[data-drag]:hover i{background:#7c8cff;height:64px}
+</style><div data-drag><i></i></div>`;
+const SPLIT_BAR_HTML = `<!doctype html><meta charset="utf-8"><style>
+html,body{margin:0;height:100%;background:transparent;overflow:hidden}
+.b{position:absolute;top:0;height:100%;border-radius:2px;background:#2a2a33;transition:background 140ms}
+#l{left:0;width:var(--l,50%)}
+#r{left:calc(var(--l,50%) + var(--g,8px));right:0}
+html[data-a="0"] #l,html[data-a="1"] #r{background:#7c8cff}
+</style><div class="b" id="l"></div><div class="b" id="r"></div>`;
+
+function splitPartner(id) {
+  const s = shared.split;
+  return s && s.ids.includes(id) ? s.ids.find((x) => x !== id) : null;
+}
+const inSplit = (id) => splitPartner(id) != null;
+
+function detach(t) {
+  if (!t || !shared.win || shared.win.isDestroyed()) return;
+  try {
+    if (t.view) shared.win.contentView.removeChildView(t.view);
+    if (t.devtools) shared.win.contentView.removeChildView(t.devtools);
+  } catch {}
+}
+
+// Pasangan split dari tab aktif, kalau split bisa digambar (DevTools / responsive view / layar penuh = tidak)
+function splitPair(tab) {
+  const s = shared.split;
+  if (!s || shared.htmlFullscreen || !s.ids.includes(tab.id)) return null;
+  const o = tabs.get(s.ids.find((x) => x !== tab.id));
+  if (!o || !o.view || o.view.webContents.isDestroyed()) return null;
+  if (tab.devtools || o.devtools || tab.resp?.on || o.resp?.on) return null;
+  return o;
+}
+
+function ensureSplitView(kind) {
+  const cur = spl[kind];
+  if (cur && !cur.webContents.isDestroyed()) return cur;
+  const view = new WebContentsView({
+    webPreferences: {
+      sandbox: true,
+      contextIsolation: true,
+      nodeIntegration: false,
+      ...(kind === "handle"
+        ? { preload: path.join(__dirname, "splitpreload.js") }
+        : {}),
+    },
+  });
+  view.setBackgroundColor("#00000000");
+  const wc = view.webContents;
+  wc.on("before-input-event", $ui.handleShortcut);
+  wc.on("will-navigate", (e) => e.preventDefault());
+  wc.setWindowOpenHandler(() => ({ action: "deny" }));
+  if (kind === "bar")
+    wc.once("did-finish-load", () => {
+      spl.applied = "";
+      layout();
+    });
+  wc.loadURL(
+    "data:text/html;charset=utf-8," +
+      encodeURIComponent(kind === "bar" ? SPLIT_BAR_HTML : SPLIT_HANDLE_HTML),
+  ).catch(() => {});
+  shared.win.contentView.addChildView(view);
+  spl[kind] = view;
+  return view;
+}
+
+function splitUiHide() {
+  for (const v of [spl.handle, spl.bar]) {
+    if (v && !v.webContents.isDestroyed()) v.setVisible(false);
+  }
+}
+
+function splitBarSync(lw, activeIdx) {
+  const key = `${lw},${activeIdx}`;
+  if (spl.applied === key) return;
+  const wc = spl.bar?.webContents;
+  if (!wc || wc.isDestroyed() || wc.isLoading()) return;
+  spl.applied = key;
+  wc.executeJavaScript(
+    `(()=>{const d=document.documentElement;d.style.setProperty('--l','${lw}px');d.style.setProperty('--g','${SPLIT_GAP}px');d.dataset.a='${activeIdx}'})()`,
+  ).catch(() => {});
+}
+
+function layoutSplit(tab, mate, A) {
+  const s = shared.split;
+  const left = tabs.get(s.ids[0]);
+  const right = tabs.get(s.ids[1]);
+  const lw = Math.round((A.w - SPLIT_GAP) * s.ratio);
+  const rw = Math.max(0, A.w - SPLIT_GAP - lw);
+  left.view.setBounds({ x: A.ox, y: A.top, width: lw, height: A.H });
+  right.view.setBounds({
+    x: A.ox + lw + SPLIT_GAP,
+    y: A.top,
+    width: rw,
+    height: A.H,
+  });
+  for (const t of [left, right]) {
+    try {
+      t.view.setBorderRadius(PAGE_RADIUS);
+      t.view.setVisible(true);
+    } catch {}
+  }
+  devUiHide();
+  respUiHide();
+  const handle = ensureSplitView("handle");
+  const bar = ensureSplitView("bar");
+  handle.setBounds({
+    x: A.ox + lw + SPLIT_GAP / 2 - SPLIT_HANDLE / 2,
+    y: A.top,
+    width: SPLIT_HANDLE,
+    height: A.H,
+  });
+  bar.setBounds({ x: A.ox, y: A.top + A.H + 2, width: A.w, height: 4 });
+  for (const v of [handle, bar]) {
+    v.setVisible(true);
+    // Naikkan di atas kedua panel (kalau urutannya di bawah); jangan mengacak overlay lain
+    const kids = shared.win.contentView.children;
+    const topIdx = Math.max(kids.indexOf(left.view), kids.indexOf(right.view));
+    if (kids.indexOf(v) < topIdx) shared.win.contentView.addChildView(v);
+  }
+  splitBarSync(lw, s.ids.indexOf(shared.activeId));
+}
+
+function makeSplit(aId, bId) {
+  if (!tabs.has(aId) || !tabs.has(bId) || aId === bId) return;
+  const old = shared.split;
+  shared.split = { ids: [aId, bId], ratio: 0.5 };
+  spl.applied = "";
+  if (old) {
+    for (const id of old.ids) {
+      if (id !== aId && id !== bId) detach(tabs.get(id));
+    }
+  }
+  activateTab(bId); // panel baru langsung aktif; activateTab memasang kedua view
+  for (const id of new Set([...(old ? old.ids : []), aId, bId])) {
+    const t = tabs.get(id);
+    if (t) pushTab(t);
+  }
+}
+
+// Ctrl+klik tab: split tab aktif dengan tab itu
+function splitWith(otherId) {
+  const cur = activeTab();
+  if (cur && cur.id !== otherId) makeSplit(cur.id, otherId);
+}
+
+// Link / URL dibuka di panel baru di sebelah tab aktif
+function openInSplit(input) {
+  const cur = activeTab();
+  if (!cur) return;
+  const newId = shared.nextId;
+  createTab(input);
+  makeSplit(cur.id, newId);
+}
+
+function closeSplit() {
+  const sp = shared.split;
+  if (!sp) return;
+  shared.split = null;
+  const act = activeTab();
+  for (const id of sp.ids) {
+    const t = tabs.get(id);
+    if (!t) continue;
+    if (!act || t.id !== act.id) detach(t);
+    pushTab(t);
+  }
+  splitUiHide();
+  layout();
+}
+
+// Ctrl+\ : tutup split kalau sedang split; kalau tidak, split dengan tab yang terakhir dipakai (atau tab baru)
+function toggleSplit() {
+  const cur = activeTab();
+  if (!cur) return;
+  if (inSplit(cur.id)) return closeSplit();
+  const others = [...tabs.values()]
+    .filter((t) => t.id !== cur.id)
+    .sort((a, b) => (b.lastActive || 0) - (a.lastActive || 0));
+  if (others.length) makeSplit(cur.id, others[0].id);
+  else openInSplit(NEWTAB_URL);
+}
+
+// Geser pegangan: rasio dari posisi kursor terhadap area halaman
+function splitDrag() {
+  const s = shared.split;
+  if (!s || !shared.win || shared.win.isDestroyed()) return;
+  const pt = screen.getCursorScreenPoint();
+  const cb = shared.win.getContentBounds();
+  const A = pageArea(cb.width, cb.height);
+  const frac =
+    (pt.x - cb.x - A.x - SPLIT_GAP / 2) / Math.max(1, A.width - SPLIT_GAP);
+  s.ratio = Math.min(1 - SPLIT_MIN, Math.max(SPLIT_MIN, frac));
+  layout();
+}
+
+ipcMain.on("splitui", (e, act) => {
+  if (!spl.handle || e.sender !== spl.handle.webContents || !shared.split) return;
+  switch (act) {
+    case "drag-start":
+      spl.dragging = true;
+      break;
+    case "drag-move":
+      if (spl.dragging) splitDrag();
+      break;
+    case "drag-end":
+      spl.dragging = false;
+      break;
+    case "reset":
+      shared.split.ratio = 0.5;
+      layout();
+      break;
+  }
+});
+
 function focusAddress() {
   if (!shared.win || shared.win.isDestroyed()) return;
-  shared.win.webContents.focus();
-  sendUI("focus-address");
+  // Ctrl+L / Tab Baru: buka command palette, berisi alamat halaman ini (terpilih semua)
+  const s = tabState(activeTab());
+  $ui.paletteOpen(s?.url || "", true);
 }
 
 // Tab Baru: ketikan langsung masuk ke address bar, tanpa perlu klik. Dipasang di before-input-event tiap tab.
@@ -578,8 +843,7 @@ function newTabTyping(wc, event, input) {
   const mod = input.control || input.meta;
   const toAddress = (text) => {
     if (!text || !shared.win || shared.win.isDestroyed()) return;
-    shared.win.webContents.focus();
-    sendUI("address:type", text);
+    $ui.paletteType(text);
   };
   if (!mod && !input.alt && input.key.length === 1) {
     // huruf, angka, simbol, spasi
@@ -625,15 +889,51 @@ function newTabTyping(wc, event, input) {
 //        (bukan paksaan terang/gelap), jadi tiap situs memakai tema pilihannya sendiri (toggle di situs, dsb.).
 // Dipasang lewat CDP (sama seperti emulasi DevTools), jadi berlaku langsung tanpa memuat ulang halaman.
 // ---------------------------------------------------------------
+// Dokumen PDF web: viewer PDF bawaan Chromium melukis sendiri; auto dark mode membuatnya layar hitam.
+// (PDF lokal file:// tidak terkena karena `web` = false di applyTheme.) Dikenali dari ekstensi .pdf, dari
+// Content-Type respons (main-network.js), atau dari document.contentType setelah navigasi (sniffPdf).
+function isPdfDoc(tab, u) {
+  if (tab.pdf && tab.pdf === u) return true;
+  if (shared.pdfDocs.has(u)) return true;
+  try {
+    return /\.pdf$/i.test(new URL(u).pathname);
+  } catch {
+    return false;
+  }
+}
+
+function sniffPdf(tab, url) {
+  const wc = tab?.view?.webContents;
+  if (!wc || wc.isDestroyed() || !isWeb(url) || tab.pdf === url) return;
+  wc.executeJavaScript("document.contentType")
+    .then((type) => {
+      if (wc.isDestroyed() || tab.view?.webContents !== wc) return;
+      if (!/^application\/pdf/i.test(String(type))) return;
+      tab.pdf = url;
+      applyTheme(tab, url);
+    })
+    .catch(() => {});
+}
+
 async function applyTheme(tab, url) {
   const wc = tab?.view?.webContents;
   if (!wc || wc.isDestroyed()) return;
-  const web = isWeb(url || wc.getURL());
+  const u = url || wc.getURL();
+  const web = isWeb(u);
   const dark = config.darkWeb !== false;
-  // Warna dasar halaman: situs yang tidak melukis latarnya sendiri (Pinterest, Erafone di area tertentu)
-  // menampilkan warna ini. Dark web mati dan OS terang = putih seperti browser biasa; selain itu = BG.
+  const pdf = web && isPdfDoc(tab, u);
+  // Situs yang dipaksa terang saat Dark web mati (tidak mengikuti tema OS), mis. Pinterest
+  let host = "";
   try {
-    tab.view.setBackgroundColor(web && !dark && !SYSTEM_DARK ? "#ffffff" : BG);
+    host = new URL(url || wc.getURL()).hostname;
+  } catch {}
+  const forceLight = web && !dark && /(^|\.)pinterest\.[a-z.]+$/i.test(host);
+  // Warna dasar halaman: situs yang tidak melukis latarnya sendiri menampilkan warna ini.
+  // Dark web mati dan (OS terang atau situs paksa-terang) = putih; selain itu = BG.
+  try {
+    tab.view.setBackgroundColor(
+      web && !dark && (forceLight || !SYSTEM_DARK) ? "#ffffff" : BG,
+    );
   } catch {}
   try {
     if (!wc.debugger.isAttached()) wc.debugger.attach("1.3");
@@ -641,14 +941,22 @@ async function applyTheme(tab, url) {
     // Tanpa parameter "enabled" = override dihapus
     await send(
       "Emulation.setAutoDarkModeOverride",
-      web && dark ? { enabled: true } : {},
+      web && dark && !pdf ? { enabled: true } : {},
     );
     // Dark web mati: ikuti skema OS asli, tidak dipaksa terang. Dark web nyala / halaman internal: bawaan (gelap).
     await send("Emulation.setEmulatedMedia", {
       features: [
         {
           name: "prefers-color-scheme",
-          value: web && !dark ? (SYSTEM_DARK ? "dark" : "light") : "",
+          // Dark web mati = ikuti skema OS asli (default sistem); khusus Pinterest dipaksa terang
+          value:
+            web && !dark
+              ? forceLight
+                ? "light"
+                : SYSTEM_DARK
+                  ? "dark"
+                  : "light"
+              : "",
         },
       ],
     });
@@ -697,6 +1005,13 @@ function buildView(tab) {
   $network.spoofUA(wc); // UA + Client Hints konsisten (lihat spoofUA)
   wc.setAudioMuted(!!tab.muted);
   const live = () => !wc.isDestroyed() && tab.view === view;
+  // Halaman menutup dirinya sendiri (window.close() setelah login OAuth, dsb.): webContents hancur tanpa
+  // lewat closeTab, sehingga tab hantu tertinggal di daftar. suspend() dan closeTab() sudah mengosongkan
+  // tab.view / menghapus tab-nya lebih dulu, jadi keduanya tidak memicu blok ini.
+  wc.once("destroyed", () => {
+    if (tab.view !== view || !tabs.has(id)) return;
+    closeTab(id);
+  });
   const push = () => {
     if (!live()) return;
     pushTab(tab);
@@ -716,7 +1031,9 @@ function buildView(tab) {
     if (e.isMainFrame && live()) applyTheme(tab, e.url);
   });
   wc.on("did-navigate", (_e, url) => {
-    if (live()) applyTheme(tab, url);
+    if (!live()) return;
+    applyTheme(tab, url);
+    sniffPdf(tab, url); // PDF tanpa ekstensi .pdf / tanpa ad blocker: dikenali dari contentType
   });
   // Tujuan link yang sedang di-hover (kosong = kursor pergi) -> kotak kecil di kiri bawah
   wc.on("update-target-url", (_e, url) => {
@@ -733,7 +1050,18 @@ function buildView(tab) {
     push();
   });
   wc.on("did-start-loading", push);
-  wc.on("did-stop-loading", push);
+  wc.on("did-stop-loading", () => {
+    // Situs tanpa <link rel="icon"> tidak memicu page-favicon-updated: pakai /favicon.ico (gagal muat = placeholder bawaan)
+    if (live() && !tab.favicon) {
+      const url = wc.getURL();
+      const o = isWeb(url) ? originOf(url) : "";
+      if (o && o !== "null") {
+        tab.favicon = o + "/favicon.ico";
+        tab.favOrigin = o;
+      }
+    }
+    push();
+  });
   wc.on("audio-state-changed", push);
   wc.on("media-started-playing", push); // cadangan untuk versi Electron lama
   // Redirect / navigasi baru / gagal muat: segarkan status supaya spinner tidak tertinggal "berhenti"
@@ -747,7 +1075,12 @@ function buildView(tab) {
   });
   wc.on("did-navigate", (_e, url) => {
     if (!live()) return;
-    tab.favicon = "";
+    // Ikon dipertahankan selama masih satu situs (back/forward, reload, bfcache tidak memicu event favicon lagi)
+    const o = originOf(url);
+    if (!o || o === "null" || o !== tab.favOrigin) {
+      tab.favicon = "";
+      tab.favOrigin = "";
+    }
     tab.keepAlive = false; // izin media berlaku untuk halaman ini saja
     $ui.findReset(tab);
     $shortcuts.resetDialog(wc); // dialog shortcut di Tab Baru ikut hilang saat halaman berganti
@@ -759,11 +1092,13 @@ function buildView(tab) {
     push();
   });
   wc.on("page-favicon-updated", (_e, list) => {
-    if (live() && list && list[0]) {
-      tab.favicon = list[0];
-      $shortcuts.setFavicon(wc.getURL(), list[0]);
-      push();
-    }
+    if (!live() || !Array.isArray(list)) return;
+    const f = list.find(validFav);
+    if (!f) return; // kosong / tidak valid: pertahankan ikon yang sudah ada
+    tab.favicon = f;
+    tab.favOrigin = originOf(wc.getURL());
+    $shortcuts.setFavicon(wc.getURL(), f);
+    push();
   });
   wc.on("did-fail-load", (_e, code, desc, failedUrl, isMainFrame) => {
     if (!live() || !isMainFrame || code === -3) return; // -3 = dibatalkan (navigasi baru)
@@ -812,6 +1147,11 @@ function buildView(tab) {
   });
   wc.on("before-input-event", (e, input) => {
     if (!newTabTyping(wc, e, input)) $ui.handleShortcut(e, input);
+  });
+  // Split view: mengklik panel lain menjadikannya tab aktif
+  wc.on("focus", () => {
+    if (live() && shared.split?.ids.includes(id) && shared.activeId !== id)
+      activateTab(id);
   });
   wc.on("enter-html-full-screen", () => {
     shared.htmlFullscreen = true;
@@ -964,26 +1304,42 @@ onUI("tab:openfiles", (paths) => {
 function activateTab(id) {
   const next = tabs.get(id);
   if (!next) return;
+  // Tab hantu (webContents sudah hancur): buang, lalu pindah ke tab lain
+  if (next.view && next.view.webContents.isDestroyed()) {
+    next.view = null; // supaya listener "destroyed" tidak ikut memproses
+    return closeTab(id);
+  }
   $ui.sgHide(); // dropdown saran akan tertutup view halaman
   $downloads.dlpHide();
   $ui.mpHide();
   if ($ui.find.open && $ui.find.tabId !== id) $ui.findClose(false); // bar cari milik tab sebelumnya
   const prev = activeTab();
+  const sameGroup = !!prev && splitPartner(prev.id) === id; // pindah antar panel split: keduanya tetap tampil
   if (prev && prev !== next) {
     prev.lastActive = Date.now(); // hitung "menganggur" sejak ditinggalkan
-    if (prev.view) {
-      try {
-        shared.win.contentView.removeChildView(prev.view);
-        if (prev.devtools)
-          shared.win.contentView.removeChildView(prev.devtools);
-      } catch {}
+    if (!sameGroup) {
+      detach(prev);
+      const pp = tabs.get(splitPartner(prev.id));
+      if (pp && pp.id !== id) detach(pp);
     }
   }
   shared.activeId = id;
   next.lastActive = Date.now();
   if (next.suspended) resume(next);
   shared.win.contentView.addChildView(next.view);
+  try {
+    next.view.setVisible(true);
+  } catch {}
   if (next.devtools) shared.win.contentView.addChildView(next.devtools);
+  // Pasangan split ikut dipasang (dibangunkan kalau sedang tidur)
+  const mate = tabs.get(splitPartner(id));
+  if (mate) {
+    if (mate.suspended) resume(mate);
+    if (mate.view) {
+      shared.win.contentView.addChildView(mate.view);
+      if (mate.devtools) shared.win.contentView.addChildView(mate.devtools);
+    }
+  }
   layout();
   // Tab Baru yang sudah terbuka: fokus ke address bar, bukan ke halamannya (yang tidak punya input)
   if (next.view.webContents.getURL() === NEWTAB_URL) focusAddress();
@@ -992,6 +1348,7 @@ function activateTab(id) {
   sendUI("tab:active", id);
   $linkstatus.hide();
   $toast.raise(); // view tab baru tidak boleh menutupi notifikasi
+  $dialog.raise(); // ...maupun dialog yang sedang terbuka
   scheduleSave();
 }
 
@@ -1015,7 +1372,19 @@ function closeTab(id) {
   const ids = [...tabs.keys()];
   const idx = ids.indexOf(id);
   const wasActive = id === shared.activeId;
-  const closing = tabState(tab);
+  // Menutup salah satu panel split membubarkan split; pasangannya jadi tab biasa
+  const mateId = splitPartner(id);
+  if (mateId != null) {
+    shared.split = null;
+    splitUiHide();
+    const m = tabs.get(mateId);
+    if (m) pushTab(m);
+  }
+  const dead = !tab.view || tab.view.webContents.isDestroyed();
+  let closing = null;
+  try {
+    closing = dead ? null : tabState(tab);
+  } catch {}
   if (closing && isWeb(closing.url)) {
     closedTabs.push(closing.url);
     if (closedTabs.length > 10) closedTabs.shift();
@@ -1031,7 +1400,11 @@ function closeTab(id) {
   tabs.delete(id);
   sendUI("tab:closed", id);
   scheduleSave();
-  if (tab.view) tab.view.webContents.close();
+  if (tab.view && !tab.view.webContents.isDestroyed()) {
+    try {
+      tab.view.webContents.close();
+    } catch {}
+  }
 
   if (tabs.size === 0) {
     shared.win.close();
@@ -1039,7 +1412,13 @@ function closeTab(id) {
   }
   if (wasActive) {
     shared.activeId = null;
-    activateTab(ids[idx + 1] ?? ids[idx - 1]);
+    activateTab(
+      mateId != null && tabs.has(mateId)
+        ? mateId
+        : (ids[idx + 1] ?? ids[idx - 1]),
+    );
+  } else if (mateId != null) {
+    layout(); // panel yang tersisa kembali memenuhi area halaman
   }
 }
 
@@ -1056,7 +1435,7 @@ function reopenClosed() {
 }
 
 // Tab hasil pemulihan dibuat dalam keadaan tidur: baru dimuat saat dibuka (RAM hemat saat startup)
-function createSuspendedTab({ u, t }) {
+function createSuspendedTab({ u, t, f }) {
   const id = shared.nextId++;
   const snap = {
     id,
@@ -1073,7 +1452,8 @@ function createSuspendedTab({ u, t }) {
     suspended: true,
     saved: { entries: [], index: 0, snap },
     lastActive: Date.now(),
-    favicon: "",
+    favicon: validFav(f) ? f : "",
+    favOrigin: validFav(f) ? originOf(u) : "",
     errorUrl: "",
     restoring: false,
   };
@@ -1108,7 +1488,11 @@ function saveSession() {
       const s = tabState(tab);
       if (!s || !isWeb(s.url)) continue;
       if (tab.id === shared.activeId) active = list.length;
-      list.push({ u: s.url, t: s.title });
+      list.push({
+        u: s.url,
+        t: s.title,
+        f: isWeb(tab.favicon) && tab.favicon.length <= 2048 ? tab.favicon : "",
+      });
     }
     shared.stores.session.set(
       list,
@@ -1158,6 +1542,9 @@ function neverSuspendHost(url) {
 
 function canSuspend(tab) {
   if (tab.id === shared.activeId || tab.suspended || !tab.view || tab.keepAlive)
+    return false;
+  // Panel split yang sedang tampil tidak boleh ditidurkan
+  if (shared.split?.ids.includes(tab.id) && shared.split.ids.includes(shared.activeId))
     return false;
   const wc = tab.view.webContents;
   if (
@@ -1306,6 +1693,13 @@ Object.assign(module.exports, {
   closeTab,
   createTab,
   cycleTab,
+  closeSplit,
+  inSplit,
+  makeSplit,
+  splitPartner,
+  openInSplit,
+  splitWith,
+  toggleSplit,
   focusAddress,
   identityFor,
   isViewable,

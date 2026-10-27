@@ -59,9 +59,55 @@ const ITEMS = [
     list: "risky",
     name: "Site data",
     button: "Clear…",
-    desc: "Local storage, IndexedDB and service workers. Web apps can lose offline data, unsent drafts and saved settings.",
+    desc: "Information websites save in your browser, like preferences, drafts and offline data. Some sites may forget your settings or sign you out.",
   },
 ];
+
+// Dialog konfirmasi modern (pengganti dialog native)
+function confirmDialog({ message, detail, button }) {
+  return new Promise((resolve) => {
+    const prev = document.activeElement;
+    const back = el("div", "modal-back");
+    const box = el("div", "modal");
+    box.setAttribute("role", "alertdialog");
+    box.setAttribute("aria-modal", "true");
+    box.setAttribute("aria-label", message);
+    const icon = el("div", "modal-ico", "!");
+    const head = el("div", "modal-title", message);
+    const body = el("div", "modal-text", detail);
+    const cancel = el("button", "", "Cancel");
+    const ok = el("button", "danger-solid", button);
+    const btns = el("div", "modal-btns");
+    btns.append(cancel, ok);
+    box.append(icon, head, body, btns);
+    back.append(box);
+
+    const done = (v) => {
+      document.removeEventListener("keydown", onKey, true);
+      back.classList.add("out");
+      setTimeout(() => back.remove(), 120);
+      if (prev && prev.focus) prev.focus();
+      resolve(v);
+    };
+    const onKey = (e) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        done(false);
+      } else if (e.key === "Tab") {
+        e.preventDefault();
+        (document.activeElement === cancel ? ok : cancel).focus();
+      }
+    };
+    cancel.addEventListener("click", () => done(false));
+    ok.addEventListener("click", () => done(true));
+    back.addEventListener("mousedown", (e) => {
+      if (e.target === back) done(false);
+    });
+    document.addEventListener("keydown", onKey, true);
+    document.body.append(back);
+    cancel.focus();
+  });
+}
 
 const sizeEls = {};
 
@@ -79,7 +125,11 @@ function buildRows() {
     );
     btn.addEventListener("click", async () => {
       btn.disabled = true;
-      const r = await api.cacheClear(it.id);
+      let r = await api.cacheClear(it.id);
+      if (r && r.confirm) {
+        const yes = await confirmDialog(r.confirm);
+        r = await api.cacheClear(it.id + (yes ? ":confirm" : ":cancel"));
+      }
       btn.disabled = false;
       if (r && r.cancelled) return;
       if (!r || !r.ok) {
@@ -252,6 +302,40 @@ function renderDns() {
     : "The provider you choose can see which site names you look up, but not the pages you read.";
 }
 
+// ---------------------------------------------------------------
+// Tab layout
+// ---------------------------------------------------------------
+const TAB_MODES = [
+  {
+    id: "sidebar",
+    name: "Sidebar",
+    tag: "Auto-hide",
+    desc: "Tabs sit in a vertical sidebar that slides in when you move the mouse to the left edge. The page gets almost the full window. Pin it with Ctrl+Shift+B.",
+  },
+  {
+    id: "top",
+    name: "Top bar",
+    tag: "Classic",
+    desc: "Tabs sit in a row above the address bar, like a traditional browser.",
+  },
+];
+let tabMode = "sidebar";
+
+function renderTabs() {
+  renderCards(
+    $("tablayout"),
+    TAB_MODES,
+    tabMode,
+    async (id) => {
+      const r = await api.settingsTabLayout(id);
+      tabMode = r === "top" || r === "sidebar" ? r : id;
+      renderTabs();
+      setStatus("tab-status", "Applied.", "ok");
+    },
+    "tablayout",
+  );
+}
+
 function setStatus(id, text, kind) {
   const s = $(id);
   s.textContent = text;
@@ -310,6 +394,9 @@ async function init() {
     dns.provider = pickProvider(s.dns.servers);
     if (dns.provider === "custom") $("custom").value = s.dns.servers.join(", ");
   }
+  const tm = await api.settingsTabLayout();
+  if (tm === "top" || tm === "sidebar") tabMode = tm;
+  renderTabs();
   renderDns();
   refreshSizes();
 }

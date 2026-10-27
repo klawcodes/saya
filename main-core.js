@@ -21,15 +21,28 @@ const shared = {
   blockedCount: 0,
   countTimer: null,
   engineIdx: 0,
+  sidebar: { pinned: false, hover: false }, // sidebar auto-hide (lihat main-ui.js)
+  split: null, // split view: { ids: [idKiri, idKanan], ratio } atau null (lihat main-tabs.js)
+  pdfDocs: new Set(), // URL dokumen utama ber-Content-Type application/pdf (diisi main-network.js, dibaca applyTheme)
 };
 
 // ---------------------------------------------------------------
-// Layout (piksel) — skema golden ratio: 26 : 42 = 1 : 1.615.
-// Samakan dengan --tab-h dan --bar-h di renderer/style.css.
+// Layout (piksel). Samakan dengan --top, --pad, --side-w di renderer/style.css.
+//   Toolbar atas (tinggi TOOLBAR_H) selalu ada; di bawahnya: bingkai FRAME_PAD, sidebar (kalau terbuka),
+//   lalu kartu halaman web dengan sudut membulat.
 // ---------------------------------------------------------------
-const TAB_BAR_H = 28;
-const TOOLBAR_H = 34;
-const CHROME_H = TAB_BAR_H + TOOLBAR_H;
+const TOOLBAR_H = 38; // = tinggi field address bar (--ctl), tanpa margin atas/bawah
+const TAB_BAR_H = TOOLBAR_H; // alias lama (tinggi overlay tombol jendela)
+const CHROME_H = TOOLBAR_H;
+const FRAME_PAD = 8;
+const SIDEBAR_W = 200;
+const SIDEBAR_COL = FRAME_PAD + SIDEBAR_W + FRAME_PAD; // x awal halaman saat sidebar terbuka (lebar default)
+const SIDEBAR_MIN = 34; // lebar minimum = mode icon-only (selebar satu ikon tab)
+const SIDEBAR_MAX = 360;
+const SIDEBAR_LABEL_MIN = 120; // di bawah ini label teks disembunyikan; drag dilepas di bawah ini = snap ke SIDEBAR_MIN
+const PAGE_RADIUS = 12;
+const TABBAR_H = 36; // mode "top": baris tab di atas
+const TOP_BAR_H = 28; // mode "top": tinggi toolbar di bawah baris tab
 const BG = "#141418";
 
 const RENDERER_DIR = path.join(__dirname, "renderer");
@@ -54,6 +67,38 @@ const APP_ICON = path.join(
   __dirname,
   process.platform === "win32" ? "icon.ico" : "icon.png",
 );
+
+// Letak tab: "sidebar" (auto-hide, ala Arc) atau "top" (baris tab di atas). Pilihan disimpan di settings.json.
+const tabLayout = () => (config.tabLayout === "top" ? "top" : "sidebar");
+const topH = () => (tabLayout() === "top" ? TABBAR_H + TOP_BAR_H : TOOLBAR_H);
+// Hanya sidebar yang di-pin yang menggeser/mengubah ukuran halaman. Sidebar hover = overlay (main-ui.js, sbo*).
+const sidebarOpen = () => tabLayout() === "sidebar" && !!shared.sidebar.pinned;
+// Lebar sidebar saat ini (bisa diubah user lewat drag, disimpan di session.json)
+const clampSbW = (n) =>
+  Math.max(
+    SIDEBAR_MIN,
+    Math.min(SIDEBAR_MAX, Math.round(Number(n)) || SIDEBAR_W),
+  );
+const storedSbW = () => {
+  const w = shared.stores?.session?.sbw;
+  return w && w < SIDEBAR_LABEL_MIN ? SIDEBAR_MIN : w; // lebar lama yang sempit = icon-only
+};
+const sidebarW = () => clampSbW(shared.sbW ?? storedSbW() ?? SIDEBAR_W);
+const sidebarCol = () => FRAME_PAD * 2 + sidebarW();
+shared.sbX = FRAME_PAD; // x awal halaman; dianimasikan main-ui.js saat sidebar buka/tutup
+
+// Area kartu halaman web (px, relatif ke isi jendela). Layar penuh HTML (video) = seluruh jendela.
+function pageArea(w, h) {
+  if (shared.htmlFullscreen) return { x: 0, y: 0, width: w, height: h };
+  const y = topH();
+  const x = tabLayout() === "top" ? FRAME_PAD : Math.round(shared.sbX);
+  return {
+    x,
+    y,
+    width: Math.max(0, w - x - FRAME_PAD),
+    height: Math.max(0, h - y - FRAME_PAD),
+  };
+}
 
 // ---------------------------------------------------------------
 // Config (config.json di folder proyek)
@@ -218,6 +263,8 @@ function writeSettings(patch) {
   if (CACHE_LIMITS.includes(s.cacheLimitMB))
     config.cacheLimitMB = s.cacheLimitMB;
   if (typeof s.darkWeb === "boolean") config.darkWeb = s.darkWeb;
+  if (s.tabLayout === "top" || s.tabLayout === "sidebar")
+    config.tabLayout = s.tabLayout;
 }
 const cacheLimitAtStart = config.cacheLimitMB | 0; // perubahan batas baru berlaku setelah Saya dibuka ulang
 if (cacheLimitAtStart > 0)
@@ -322,6 +369,8 @@ function toUrl(input) {
 function sendUI(channel, payload) {
   if (shared.win && !shared.win.isDestroyed())
     shared.win.webContents.send(channel, payload);
+  if (channel.startsWith("tab:") && shared.onTabsChanged)
+    shared.onTabsChanged(); // sidebar hover ikut diperbarui
 }
 
 function onUI(channel, handler) {
@@ -376,6 +425,7 @@ function tabState(tab) {
     suspended: tab.suspended,
     audible: !tab.suspended && tab.view.webContents.isCurrentlyAudible(),
     muted: !!tab.muted,
+    split: !!(shared.split && shared.split.ids.includes(tab.id)),
     bookmarkable: isWeb(s.url),
     bookmarked: shared.stores.bookmarks.has(s.url),
   };
@@ -403,6 +453,18 @@ Object.assign(module.exports, {
   BG,
   CACHE_LIMITS,
   CHROME_H,
+  FRAME_PAD,
+  PAGE_RADIUS,
+  SIDEBAR_COL,
+  SIDEBAR_LABEL_MIN,
+  SIDEBAR_MAX,
+  SIDEBAR_MIN,
+  SIDEBAR_W,
+  TOOLBAR_H,
+  TABBAR_H,
+  TOP_BAR_H,
+  tabLayout,
+  topH,
   DEFAULT_ADBLOCK_LISTS,
   DNS_MODES,
   ERROR_URL,
@@ -424,10 +486,15 @@ Object.assign(module.exports, {
   handleUI,
   isDohUrl,
   onUI,
+  pageArea,
   pushTab,
   searchUrl,
   sendUI,
   shared,
+  clampSbW,
+  sidebarCol,
+  sidebarOpen,
+  sidebarW,
   tabState,
   tabs,
   toUrl,

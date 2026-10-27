@@ -2,6 +2,8 @@
   const api = window.browserAPI;
   const tabsEl = document.getElementById("tabs");
   const addressEl = document.getElementById("address");
+  const addrText = document.getElementById("addr-text");
+  const addrBoxEl = document.getElementById("addrbox");
   const backBtn = document.getElementById("back");
   const forwardBtn = document.getElementById("forward");
   const reloadBtn = document.getElementById("reload");
@@ -12,11 +14,16 @@
   const siteBtn = document.getElementById("site");
   const dlBtn = document.getElementById("downloads");
   const brandEl = document.getElementById("brand");
-  const toolbar = document.getElementById("toolbar");
-  const address = document.getElementById("address");
+  const toggleBtn = document.getElementById("sidebar-toggle");
+  const hotEl = document.getElementById("hot");
+  const sidebarEl = document.getElementById("sidebar");
+  const tabbarEl = document.getElementById("tabbar");
+  const tabzoneEl = document.getElementById("tabzone");
+  let axis = "y"; // arah daftar tab: "y" (sidebar) atau "x" (baris tab atas)
 
-  let addrReady = false;
-  let readyTimer = null;
+  // --n = jumlah tab; dipakai CSS mode top untuk lebar dasar baris tab
+  const countTabs = () =>
+    tabsEl.style.setProperty("--n", String(tabsEl.children.length || 1));
 
   const CLOSE_SVG =
     '<svg viewBox="0 0 8 8" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M1 1l6 6M7 1L1 7"/></svg>';
@@ -29,9 +36,6 @@
     '<path d="M10.5 6a3 3 0 0 1 0 4M12.2 4.3a5.4 5.4 0 0 1 0 7.4"/></svg>';
   const MUTED_SVG = SPK + '<path d="M10.5 6.2l3.5 3.6M14 6.2l-3.5 3.6"/></svg>';
   let activeId = null;
-
-  const countTabs = () =>
-    tabsEl.style.setProperty("--n", String(tabsEl.children.length || 1));
 
   function formatCount(n) {
     if (!n) return "";
@@ -61,8 +65,15 @@
           e.preventDefault();
           api.closeTab(data.id);
         } else if (e.button === 0 && !e.target.closest(".close, .audio")) {
-          api.activateTab(data.id);
+          // Ctrl+klik = buka tab ini berdampingan (split view) dengan tab aktif
+          if (e.ctrlKey || e.metaKey) api.splitTab(data.id);
+          else api.activateTab(data.id);
         }
+      });
+      // Klik kanan = menu tab (isi menu disusun main sesuai letak tab)
+      el.addEventListener("contextmenu", (e) => {
+        e.preventDefault();
+        api.tabMenu(data.id);
       });
       el.querySelector(".favicon").style.backgroundSize = "cover";
       el.querySelector(".close").addEventListener("click", (e) => {
@@ -73,7 +84,6 @@
       countTabs();
     }
 
-    // Spinner: (bagian ini tidak berubah)
     const fav = el.querySelector(".favicon");
     if (data.loading) {
       if (el._stop) {
@@ -95,10 +105,10 @@
       setFav(fav, data.favicon);
     }
     el.classList.toggle("suspended", !!data.suspended);
+    el.classList.toggle("split", !!data.split);
     el.classList.toggle("active", data.id === activeId);
     el.querySelector(".title").textContent = data.title || "New Tab";
 
-    // Ikon audio: tampil kalau sedang bersuara atau di-mute
     const au = el.querySelector(".audio");
     const mode = data.muted ? "muted" : data.audible ? "on" : "";
     if (au.dataset.m !== mode) {
@@ -113,6 +123,17 @@
       (data.suspended ? " (sleeping, loads when opened)" : "");
   }
 
+  // Tampilan ringkas di toolbar (host saja, ala Arc); alamat lengkap dibuka di palette lewat klik / Ctrl+L
+  function shortAddr(url) {
+    if (!url) return "";
+    if (/^https?:\/\//i.test(url)) {
+      try {
+        return new URL(url).host.replace(/^www\./, "");
+      } catch {}
+    }
+    return url;
+  }
+
   function syncToolbar() {
     const data = state.get(activeId);
     if (!data) return;
@@ -124,9 +145,27 @@
     starBtn.title = data.bookmarked
       ? "Remove bookmark (Ctrl+D)"
       : "Add bookmark (Ctrl+D)";
-    // activeElement stays the input even after focus moves to the web page, so also check hasFocus()
-    const editing = document.activeElement === addressEl && document.hasFocus();
-    if (!editing) addressEl.value = data.url || "";
+    const short = shortAddr(data.url);
+    addrText.textContent = short || "Search or enter address";
+    addressEl.classList.toggle("empty", !short);
+    syncLoad(!!data.loading);
+  }
+
+  // Indikator loading di address bar. Status "loading" tab aktif; ditunda sebentar supaya muatan
+  // yang sangat singkat tidak berkedip. Tampil/tidaknya (mode top, sidebar di-pin) diatur CSS lewat class body.
+  let loadTimer = 0;
+  function syncLoad(on) {
+    if (on) {
+      if (!loadTimer && !addrBoxEl.classList.contains("loading"))
+        loadTimer = setTimeout(() => {
+          loadTimer = 0;
+          addrBoxEl.classList.add("loading");
+        }, 150);
+    } else {
+      clearTimeout(loadTimer);
+      loadTimer = 0;
+      addrBoxEl.classList.remove("loading");
+    }
   }
 
   function setActive(id) {
@@ -159,52 +198,103 @@
     countTabs();
   });
 
-  function addrAnimMs() {
-    // Baca durasi dari CSS supaya tidak perlu disamakan manual.
-    // Dengan prefers-reduced-motion hasilnya 0, jadi popup langsung muncul.
-    return (
-      (parseFloat(getComputedStyle(toolbar).transitionDuration) || 0) * 1000
-    );
-  }
-
-  function onAddrReady() {
-    if (addrReady) return;
-    addrReady = true;
-    clearTimeout(readyTimer);
-    // Animasi selesai: tampilkan suggestion (posisi dihitung ulang di sini)
-    if (document.activeElement === address) refreshSuggestions();
-  }
-
-  address.addEventListener("focus", () => {
-    addrReady = false;
-    clearTimeout(readyTimer);
-    // Cadangan kalau transitionend tidak terkirim
-    readyTimer = setTimeout(onAddrReady, addrAnimMs() + 30);
+  // ---------- Sidebar auto-hide ----------
+  // Status dikirim main (yang juga menggeser area halaman). Kursor di tepi kiri = minta buka;
+  // menutupnya diurus main lewat polling posisi kursor.
+  // Letak tab dipilih di main (menu titik tiga / palette / Settings); di sini daftar tab dipindah ke tempatnya
+  api.on("layout:state", (s) => {
+    const top = !!s && s.mode === "top";
+    document.body.classList.toggle("mode-top", top);
+    (top ? tabbarEl : sidebarEl).appendChild(tabzoneEl);
+    axis = top ? "x" : "y";
+    requestAnimationFrame(() => reportAnchor());
   });
-
-  address.addEventListener("blur", () => {
-    addrReady = false;
-    clearTimeout(readyTimer);
-  });
-
-  // Sinyal utama: animasi pelebaran selesai
-  toolbar.addEventListener("transitionend", (e) => {
-    if (e.target === toolbar && e.propertyName === "grid-template-columns") {
-      onAddrReady();
+  // Lebar sidebar: --side-w diatur di sini; class sb-mini = mode icon-only (label teks disembunyikan)
+  const resizeEl = document.getElementById("sb-resize");
+  const sb = { w: 200, min: 34, max: 360, labelMin: 120 };
+  let rs = null; // drag resize yang sedang berjalan
+  const applyWidth = (w) => {
+    sb.w = w;
+    document.documentElement.style.setProperty("--side-w", w + "px");
+    document.body.classList.toggle("sb-mini", w < sb.labelMin);
+  };
+  api.on("sidebar:state", (s) => {
+    if (!s) return;
+    document.body.classList.toggle("sb-open", !!s.open);
+    toggleBtn.classList.toggle("on", !!s.pinned);
+    if (Number.isFinite(s.width)) {
+      sb.min = s.min || sb.min;
+      sb.max = s.max || sb.max;
+      sb.labelMin = s.labelMin || sb.labelMin;
+      if (!rs) applyWidth(s.width);
     }
   });
+  let hotTimer = 0;
+  hotEl.addEventListener("mouseenter", () => {
+    clearTimeout(hotTimer);
+    hotTimer = setTimeout(() => api.sidebarHover(true), 100);
+  });
+  hotEl.addEventListener("mouseleave", () => clearTimeout(hotTimer));
+  toggleBtn.addEventListener("click", () => api.sidebarToggle());
 
-  // ---------- Geser tab untuk mengubah urutan ----------
-  // Ringan: listener bergerak hanya terpasang selama drag; tab digeser dengan transform (tanpa layout ulang
-  // berulang) dan urutan DOM ditukar saat melewati tengah tab tetangga. Urutan akhir dikirim sekali ke main.
+  // ---------- Resize sidebar ----------
+  // Saat drag: CSS langsung mengikuti, lebar dikirim ke main (maks 1x per frame) supaya halaman ikut bergeser.
+  // Saat dilepas: di bawah labelMin = snap ke lebar minimum (icon-only) dengan transisi halus.
+  function resizeEnd() {
+    if (!rs) return;
+    const { w, raf } = rs;
+    cancelAnimationFrame(raf);
+    rs = null;
+    document.body.classList.remove("sb-resizing");
+    const final = w < sb.labelMin ? sb.min : w;
+    applyWidth(final);
+    api.sidebarResize(final, true);
+  }
+  resizeEl.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0 || rs) return;
+    e.preventDefault();
+    rs = { x0: e.clientX, w0: sb.w, w: sb.w, raf: 0 };
+    try {
+      resizeEl.setPointerCapture(e.pointerId);
+    } catch {}
+    document.body.classList.add("sb-resizing");
+  });
+  resizeEl.addEventListener("pointermove", (e) => {
+    if (!rs) return;
+    if (e.buttons === 0) return resizeEnd();
+    const cur = rs;
+    const w = Math.max(sb.min, Math.min(sb.max, Math.round(cur.w0 + e.clientX - cur.x0)));
+    if (w === cur.w) return;
+    cur.w = w;
+    applyWidth(w);
+    if (!cur.raf)
+      cur.raf = requestAnimationFrame(() => {
+        cur.raf = 0;
+        if (rs === cur) api.sidebarResize(cur.w, false);
+      });
+  });
+  resizeEl.addEventListener("pointerup", resizeEnd);
+  resizeEl.addEventListener("pointercancel", resizeEnd);
+  resizeEl.addEventListener("lostpointercapture", resizeEnd);
+  resizeEl.addEventListener("dblclick", () => api.sidebarResizeToggle());
+
+  // ---------- Geser tab untuk mengubah urutan (vertikal di sidebar, horizontal di baris tab atas) ----------
+  // Listener bergerak hanya terpasang selama drag; tab digeser dengan transform dan urutan DOM ditukar
+  // saat melewati tengah tab tetangga. Urutan akhir dikirim sekali ke main.
   let drag = null;
   const DRAG_THRESHOLD = 5;
+  const mid = (n) => {
+    const b = n.getBoundingClientRect();
+    return axis === "x" ? b.left + b.width / 2 : b.top + b.height / 2;
+  };
 
   function dragMove(e) {
     if (!drag) return;
+    const horiz = axis === "x";
+    const pos = horiz ? e.clientX : e.clientY;
     const el = drag.el;
     if (!drag.on) {
-      if (Math.abs(e.clientX - drag.x0) < DRAG_THRESHOLD) return;
+      if (Math.abs(pos - drag.p0) < DRAG_THRESHOLD) return;
       drag.on = true;
       el.classList.add("dragging");
       try {
@@ -212,28 +302,25 @@
       } catch {}
     }
     const box = tabsEl.getBoundingClientRect();
+    const lo = horiz ? box.left : box.top;
+    const hi = horiz ? box.right : box.bottom;
     const place = () => {
       const r = el.getBoundingClientRect();
-      const natural = r.left - drag.tx; // posisi tanpa transform
-      let left = e.clientX - drag.grab;
-      left = Math.max(box.left, Math.min(left, box.right - r.width));
-      drag.tx = left - natural;
-      el.style.transform = `translateX(${drag.tx}px)`;
-      return left + r.width / 2; // pusat tab saat ini
+      const size = horiz ? r.width : r.height;
+      const natural = (horiz ? r.left : r.top) - drag.t; // posisi tanpa transform
+      let start = pos - drag.grab;
+      start = Math.max(lo, Math.min(start, hi - size));
+      drag.t = start - natural;
+      el.style.transform = `${horiz ? "translateX" : "translateY"}(${drag.t}px)`;
+      return start + size / 2; // pusat tab saat ini
     };
-    let center = place();
+    const center = place();
     const next = el.nextElementSibling;
     const prev = el.previousElementSibling;
-    if (
-      next &&
-      center > next.getBoundingClientRect().left + next.offsetWidth / 2
-    ) {
+    if (next && center > mid(next)) {
       next.after(el);
       place();
-    } else if (
-      prev &&
-      center < prev.getBoundingClientRect().left + prev.offsetWidth / 2
-    ) {
+    } else if (prev && center < mid(prev)) {
       prev.before(el);
       place();
     }
@@ -257,65 +344,21 @@
     if (e.button !== 0 || drag) return;
     const el = e.target.closest(".tab");
     if (!el || e.target.closest(".close, .audio")) return;
+    const r = el.getBoundingClientRect();
+    const horiz = axis === "x";
     drag = {
       el,
       id: Number(el.dataset.id),
       from: [...tabsEl.children].indexOf(el),
-      x0: e.clientX,
-      grab: e.clientX - el.getBoundingClientRect().left,
-      tx: 0,
+      p0: horiz ? e.clientX : e.clientY,
+      grab: horiz ? e.clientX - r.left : e.clientY - r.top,
+      t: 0,
       pid: e.pointerId,
       on: false,
     };
     window.addEventListener("pointermove", dragMove);
     window.addEventListener("pointerup", dragEnd);
     window.addEventListener("pointercancel", dragEnd);
-  });
-  api.on("focus-address", () => {
-    addressEl.focus();
-    addressEl.select();
-  });
-
-  const setPlaceholder = (name) => {
-    addressEl.placeholder = name
-      ? `Search with ${name} or type an address`
-      : "Search or type an address";
-  };
-  function querySuggest(force) {
-    const r = addressEl.getBoundingClientRect();
-    api.suggestQuery(
-      addressEl.value,
-      { x: r.left, width: r.width, bottom: r.bottom },
-      !!force,
-    );
-  }
-  api.on("engine:changed", (e) => {
-    if (!e) return;
-    setPlaceholder(e.name);
-    if (e.fresh) {
-      addressEl.focus();
-      addressEl.value = "";
-    } else if (e.refocus) {
-      addressEl.focus();
-      const n = addressEl.value.length;
-      addressEl.setSelectionRange(n, n);
-    }
-    if (document.activeElement === addressEl) querySuggest(true);
-  });
-  // Ketikan dari halaman Tab Baru diteruskan ke address bar (lihat newTabTyping di main.js)
-  api.on("address:type", (text) => {
-    if (typeof text !== "string" || !text) return;
-    if (!(document.activeElement === addressEl && document.hasFocus())) {
-      addressEl.focus();
-      addressEl.value = "";
-    }
-    addressEl.value += text;
-    const n = addressEl.value.length;
-    addressEl.setSelectionRange(n, n);
-    querySuggest(false);
-  });
-  api.on("suggest:fill", (text) => {
-    if (typeof text === "string") addressEl.value = text;
   });
 
   function applyAdblock(s) {
@@ -333,7 +376,6 @@
   api.on("adblock:count", (n) => {
     adblockCount.textContent = formatCount(n);
   });
-  // Ikon unduhan: berwarna + bar progres selama ada unduhan berjalan
   api.on("downloads:badge", (s) => {
     if (!s) return;
     const busy = s.active > 0;
@@ -375,30 +417,12 @@
     api.menu({ right: r.right, bottom: r.bottom });
   });
   siteBtn.addEventListener("click", () => api.site());
+  // Klik URL = buka command palette berisi alamat halaman ini (terpilih semua)
+  addressEl.addEventListener("click", () =>
+    api.openPalette(state.get(activeId)?.url || ""),
+  );
 
-  addressEl.addEventListener("keydown", (e) => {
-    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-      e.preventDefault();
-      api.suggestMove(e.key === "ArrowDown" ? 1 : -1);
-    } else if (e.key === "Enter") {
-      api.go(addressEl.value);
-      addressEl.blur();
-    } else if (e.key === "Escape") {
-      addressEl.value = state.get(activeId)?.url || "";
-      addressEl.blur();
-    }
-  });
-  addressEl.addEventListener("focus", () => {
-    addressEl.select();
-    api.suggestFocus();
-  });
-  addressEl.addEventListener("blur", () => {
-    api.suggestBlur();
-    syncToolbar();
-  });
-  addressEl.addEventListener("input", () => querySuggest(false));
-
-  // Drop file (mis. dari panel unduhan) di tab bar / toolbar: gambar, txt, dan pdf dibuka di tab baru
+  // Drop file (mis. dari panel unduhan) di sidebar / toolbar: gambar, txt, dan pdf dibuka di tab baru
   const hasFiles = (e) =>
     e.dataTransfer && [...e.dataTransfer.types].includes("Files");
   document.addEventListener("dragover", (e) => {
@@ -414,10 +438,10 @@
 
   api.init().then((s) => {
     applyAdblock(s);
-    setPlaceholder(s && s.engine);
-    if (s && s.logo) {
-      brandEl.src = s.logo;
-      brandEl.hidden = false;
-    }
+    // Logo di pojok kiri dinonaktifkan (di-comment). Hapus tanda comment di bawah untuk menampilkannya lagi.
+    // if (s && s.logo) {
+    //   brandEl.src = s.logo;
+    //   brandEl.hidden = false;
+    // }
   });
 })();

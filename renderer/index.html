@@ -8,19 +8,27 @@
     />
     <title>Saya</title>
     <link rel="stylesheet" href="style.css" />
+    <link rel="stylesheet" href="addrload.css" />
   </head>
   <body>
-    <header id="tabbar">
-      <img id="brand" alt="" draggable="false" hidden />
-      <div id="tabs"></div>
-      <button id="new-tab" class="icon-btn" title="New tab (Ctrl+T)">
-        <svg viewBox="0 0 16 16"><path d="M8 3v10M3 8h10" /></svg>
-      </button>
-      <div id="drag"></div>
-    </header>
+    <div id="stage"></div>
 
-    <nav id="toolbar">
+    <!-- Mode "top": baris tab di atas (tabzone dipindah ke sini oleh renderer.js) -->
+    <header id="tabbar"></header>
+
+    <header id="topbar">
       <div class="side left">
+        <img id="brand" alt="" draggable="false" hidden />
+        <button
+          id="sidebar-toggle"
+          class="icon-btn"
+          title="Toggle sidebar (Ctrl+Shift+B)"
+        >
+          <svg viewBox="0 0 16 16">
+            <rect x="2" y="3" width="12" height="10" rx="2.5" />
+            <path d="M6 3v10" />
+          </svg>
+        </button>
         <button id="back" class="icon-btn" title="Back (Alt+Left)" disabled>
           <svg viewBox="0 0 16 16"><path d="M10 3L5 8l5 5" /></svg>
         </button>
@@ -53,13 +61,11 @@
             <circle cx="6" cy="11" r="1.5" />
           </svg>
         </button>
-        <input
-          id="address"
-          type="text"
-          spellcheck="false"
-          autocomplete="off"
-          placeholder="Search or type an address"
-        />
+        <button id="address" type="button" title="Search or enter address (Ctrl+L)">
+          <span id="addr-text">Search or enter address</span>
+        </button>
+        <!-- Indikator loading halus; hanya tampil saat tab memuat, mode sidebar, dan sidebar tidak di-pin (lihat addrload.css) -->
+        <span id="addr-load" aria-hidden="true"></span>
       </div>
 
       <div class="side right">
@@ -96,7 +102,24 @@
           </svg>
         </button>
       </div>
-    </nav>
+    </header>
+
+    <aside id="sidebar">
+     <div id="tabzone">
+      <div id="tabs"></div>
+      <!-- Tepat di bawah tab terakhir; #tabs setinggi isinya dan baru menggulir saat ruang habis -->
+      <button id="new-tab" title="New tab (Ctrl+T)">
+        <svg viewBox="0 0 16 16"><path d="M8 3v10M3 8h10" /></svg>
+        <span>New Tab</span>
+      </button>
+     </div>
+    </aside>
+
+    <!-- Tepi kiri: kursor di sini membuka sidebar yang tersembunyi -->
+    <div id="hot"></div>
+
+    <!-- Handle resize sidebar (di celah antara sidebar dan halaman; hanya aktif saat sidebar di-pin) -->
+    <div id="sb-resize" title="Drag to resize, double-click to collapse/expand"></div>
 
     <script src="renderer.js"></script>
   </body>

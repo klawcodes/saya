@@ -6,9 +6,14 @@ const {
   BrowserWindow,
   session,
   Menu,
-  dialog,
+  Notification,
   screen,
 } = require("electron");
+
+// Matikan semua notifikasi sistem (toast Windows "Electron - Download complete" dsb).
+// Dipasang di sini supaya berlaku untuk modul mana pun yang memakai Notification.
+Notification.prototype.show = function () {};
+Notification.isSupported = () => false;
 const path = require("path");
 const fs = require("fs");
 const { createStores } = require("./store");
@@ -21,6 +26,9 @@ const {
   PAGES,
   RENDERER_DIR,
   TAB_BAR_H,
+  TOOLBAR_H,
+  TABBAR_H,
+  tabLayout,
   activeWC,
   cacheLimitAtStart,
   config,
@@ -87,7 +95,7 @@ function createWindow() {
     backgroundColor: BG,
     ...(fs.existsSync(APP_ICON) ? { icon: APP_ICON } : {}), // ikon jendela/taskbar (icon.ico di folder proyek)
     titleBarStyle: "hidden",
-    titleBarOverlay: { color: BG, symbolColor: "#a8a8b3", height: TAB_BAR_H },
+    titleBarOverlay: { color: BG, symbolColor: "#a8a8b3", height: tabLayout() === "top" ? TABBAR_H : TOOLBAR_H },
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -105,6 +113,7 @@ function createWindow() {
   shared.win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   shared.win.webContents.on("before-input-event", $ui.handleShortcut);
   shared.win.webContents.once("did-finish-load", $tabs.startTabs);
+  shared.win.webContents.once("did-finish-load", $ui.sendLayoutState); // mode tab + status sidebar ke UI
 
   shared.win.on("resize", $tabs.layout);
   shared.win.on("resize", $ui.sgHide);
@@ -284,8 +293,8 @@ const CLEAR = {
     button: "Clear site data",
     message: "Clear all site data?",
     detail:
-      "This removes local storage, IndexedDB and registered service workers. You may be signed out, " +
-      "and web apps can lose offline data, unsent drafts and their saved settings.",
+      "This removes the information websites save in your browser, such as preferences, saved drafts " +
+      "and offline data. You may be signed out of some sites, and some sites will forget your settings.",
     run: (ses) =>
       ses.clearStorageData({
         storages: [
@@ -383,26 +392,29 @@ handleInternal("saya:cache:sizes", async () => {
   return out;
 });
 
-handleInternal("saya:cache:clear", async (id) => {
-  const c =
-    typeof id === "string" && Object.hasOwn(CLEAR, id) ? CLEAR[id] : null;
+// Konfirmasi item berbahaya ditampilkan di halaman Settings (dialog modern), bukan dialog native.
+// Alurnya dua langkah supaya tetap dijaga proses utama: "id" -> minta konfirmasi (armed),
+// "id:confirm" -> jalankan, "id:cancel" -> batal.
+const armed = new Map();
+const ARM_MS = 120_000;
+
+handleInternal("saya:cache:clear", async (raw) => {
+  const [id, step] = String(raw).split(":");
+  const c = Object.hasOwn(CLEAR, id) ? CLEAR[id] : null;
   if (!c) return { ok: false, error: "Unknown item." };
   if (c.danger) {
-    const opts = {
-      type: "warning",
-      title: "Saya",
-      message: c.message,
-      detail: c.detail,
-      buttons: ["Cancel", c.button],
-      defaultId: 0,
-      cancelId: 0,
-      noLink: true,
-    };
-    const { response } =
-      shared.win && !shared.win.isDestroyed()
-        ? await dialog.showMessageBox(shared.win, opts)
-        : await dialog.showMessageBox(opts);
-    if (response !== 1) return { ok: false, cancelled: true };
+    if (!step) {
+      armed.set(id, Date.now());
+      return {
+        ok: false,
+        confirm: { message: c.message, detail: c.detail, button: c.button },
+      };
+    }
+    const t = armed.get(id);
+    armed.delete(id);
+    if (step !== "confirm") return { ok: false, cancelled: true };
+    if (!t || Date.now() - t > ARM_MS)
+      return { ok: false, error: "Confirmation expired. Try again." };
   }
   const before = await clearSize(c);
   try {

@@ -1,0 +1,43 @@
+/* Menu klik kanan tab: palet sama dengan sidebar & menu titik tiga. */
+:root { color-scheme: dark; }
+* { box-sizing: border-box; margin: 0; }
+html, body {
+  background: #1c1c22;
+  color: #e4e4ea;
+  font: 13px/1 "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  user-select: none;
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+#m {
+  padding: 6px;
+  border: 1px solid #34343f;
+  border-radius: 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.it {
+  height: 34px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 9px;
+  background: none;
+  color: #e4e4ea;
+  font: inherit;
+  text-align: left;
+  cursor: default;
+  transition: background 0.1s;
+}
+.it svg { flex: none; width: 15px; height: 15px; color: #a8a8b3; }
+.it span { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.it:hover, .it.on { background: #26262e; }
+.it:active { background: #2e2e38; }
+.it:focus-visible { outline: 2px solid #7c8cff; outline-offset: -2px; }
+.it.danger, .it.danger svg { color: #ff7a7a; }
+.it.danger:hover, .it.danger.on { background: rgba(255, 122, 122, 0.12); }
+.it.danger:active { background: rgba(255, 122, 122, 0.2); }
+.sep { flex: none; height: 1px; margin: 4px 6px; background: #2a2a33; }

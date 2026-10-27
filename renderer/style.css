@@ -1,11 +1,6 @@
 /* ------------------------------------------------------------------
-   Skema golden ratio, dibuat ringkas:
-     tab bar 26 : toolbar 42           = 1 : 1,615
-     tinggi address bar = tinggi tab bar (26)
-     ikon 16 : tombol 26               = 0,615
-     address bar 377 -> 610 saat fokus = 1 : 1,618
-   Jarak antar elemen memakai deret Fibonacci (3 5 8 13 21).
-   Samakan --tab-h dan --bar-h dengan TAB_BAR_H dan TOOLBAR_H di main.js.
+   Layout ala Arc: toolbar atas + sidebar tab (auto-hide) + kartu halaman berbingkai.
+   Samakan --top, --pad, --side-w dengan TOOLBAR_H, FRAME_PAD, SIDEBAR_W di main-core.js.
 ------------------------------------------------------------------- */
 :root {
   --f3: 3px;
@@ -13,29 +8,21 @@
   --f8: 8px;
   --f13: 13px;
   --f21: 21px;
-  --f34: 34px;
-  --f55: 55px;
-  --f89: 89px;
-  --f144: 144px;
-  --f233: 233px;
 
-  --tab-h: 28px;
-  --bar-h: 34px;
-  --ctl: 26px;
+  --tabrow: 0px; /* tinggi baris tab di atas (mode top) */
+  --barh: 38px; /* tinggi toolbar = tinggi field address bar (--ctl) */
+  --pad: 8px;
+  --side-w: 200px;
+  --ctl: 28px;
   --ico: 18px;
-  --addr-w: min(
-    377px,
-    calc(100% - 288px)
-  ); /* sisakan 2 x 144px untuk tombol kiri/kanan */
-  --strip-h: var(--ctl); /* setara address bar (26px); ubah kalau mau beda */
-  --bg-strip: var(--bg); /* warna panel; lihat opsi di bawah */
 
-  --bg: #141418; /* bingkai & tab bar */
-  --bg-tab: #1c1c22; /* toolbar & tab aktif */
+  --bg: #141418; /* bingkai jendela */
+  --bg-tab: #1c1c22; /* kartu di balik halaman */
   --bg-hover: #26262e;
-  --bg-input: #30303c; /* address bar: sengaja lebih terang dari toolbar */
-  --bg-input-hover: #373745;
-  --bg-input-focus: #3d3d4d;
+  --bg-sel: #2e2e38;
+  --bg-input: #25252d;
+  --bg-input-hover: #2e2e38;
+  --line: #34343f;
   --fg: #e4e4ea;
   --fg-dim: #a8a8b3;
   --accent: #7c8cff;
@@ -49,7 +36,7 @@
 
 html,
 body {
-  height: calc(var(--tab-h) + var(--bar-h));
+  height: 100%;
   background: var(--bg);
   color: var(--fg);
   font:
@@ -59,278 +46,107 @@ body {
   overflow: hidden;
   user-select: none;
 }
-
-/* ---------- Tab bar ---------- */
-/* Logo Saya (branding) di ujung kiri; sejajar tengah dengan tab (tinggi tab 31 -> logo 16) */
-#brand {
-  flex: none;
-  width: 16px;
-  height: 16px;
-  margin: 0 var(--f8) 4.5px var(--f5);
-  pointer-events: none;
+body {
+  --top: calc(var(--tabrow) + var(--barh));
+  --bar-pr: 142px; /* sisa kanan untuk tombol jendela Windows */
+  --left: var(--pad); /* x awal kartu halaman */
 }
-#tabbar {
-  height: var(--tab-h);
-  display: flex;
-  align-items: flex-end;
-  padding: 0 0 0 var(--f8);
-  /* Tab bar BUKAN area seret. Satu-satunya area seret jendela adalah #drag di kanan, sehingga
-     klik di tab, di tepi atas tab, atau celah antar tab tidak pernah dianggap seretan jendela. */
-}
-/* Ruang kosong di kanan tab: menyeret jendela. Lebar minimal 144px = ruang untuk tombol minimize/maximize/close Windows */
-#drag {
-  flex: 1 0 var(--f144);
-  align-self: stretch;
-  -webkit-app-region: drag;
+body.sb-open {
+  --left: calc(var(--pad) * 2 + var(--side-w));
 }
 
-/* --n = jumlah tab (diisi renderer.js). Lebar dasar = n x 233: sedikit tab -> semuanya lebar penuh,
-   banyak tab -> flex-shrink membagi sisa ruang merata. Tidak bisa pakai "auto" karena
-   container-type membuat lebar intrinsik tab dihitung 0. */
-#tabs {
-  display: flex;
-  align-items: flex-end;
-  gap: var(--f3);
-  min-width: 0;
-  flex: 0 1 calc(var(--n, 1) * (var(--f233) + var(--f3)));
-  align-self: stretch; /* setinggi tab bar penuh */
+/* Bingkai tipis di sekeliling halaman (halamannya sendiri adalah view terpisah, 1px lebih kecil) */
+#stage {
+  position: fixed;
+  top: calc(var(--top) - 1px);
+  left: calc(var(--left) - 1px);
+  right: calc(var(--pad) - 1px);
+  bottom: calc(var(--pad) - 1px);
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: var(--bg-tab);
+  transition: left 170ms cubic-bezier(0.215, 0.61, 0.355, 1); /* serasi dengan animasi area halaman (main-ui.js) */
 }
 
-/* Lebar tab dinamis: sedikit tab = lebar penuh (233), banyak tab = menyusut
-   merata sampai 55. Tab aktif tidak pernah lebih kecil dari 89 (ikon + tombol tutup).
-   .tab adalah container; isinya (.body) menyesuaikan lewat @container di bawah. */
-.tab {
-  position: relative;
-  -webkit-app-region: no-drag;
-  container-type: inline-size;
-  height: calc(var(--tab-h) - var(--f3));
-  min-width: var(--f55);
-  max-width: var(--f233);
-  flex: 1 1 var(--f233);
-  background: transparent;
-  border-radius: var(--f8) var(--f8) 0 0;
-  color: var(--fg-dim);
-  cursor: default;
-  animation: tab-in 144ms ease-out;
-}
-/* Perluas area klik 3px ke atas (tanpa mengubah ukuran tampilan tab): klik di tepi atas = klik tab ini */
-.tab::before {
-  content: "";
-  position: absolute;
-  top: calc(-1 * var(--f3));
+/* ---------- Toolbar atas ---------- */
+/* Seluruh bar = area seret jendela; tombol & URL dikecualikan. Kanan disisakan untuk tombol jendela Windows. */
+#topbar {
+  position: fixed;
+  top: var(--tabrow);
   left: 0;
   right: 0;
-  height: var(--f3);
-}
-/* Sedang digeser: mengikuti kursor (transform diatur renderer.js) */
-.tab.dragging {
-  z-index: 2;
-  animation: none;
-  background: var(--bg-hover);
-  box-shadow: 0 2px 8px rgb(0 0 0 / 0.4);
-}
-.tab.active {
-  min-width: var(--f89);
-  background: var(--bg-tab);
-  color: var(--fg);
-}
-.tab:not(.active):hover {
-  background: var(--bg-hover);
-}
-@keyframes tab-in {
-  from {
-    flex-basis: 0;
-    min-width: 0;
-    opacity: 0;
-  }
-}
-
-.tab .body {
-  height: 100%;
-  display: flex;
+  height: var(--barh);
+  display: grid;
+  grid-template-columns: 1fr minmax(0, 440px) 1fr;
   align-items: center;
   gap: var(--f8);
-  padding: 0 var(--f5) 0 var(--f13);
+  padding: 0 var(--bar-pr) 0 var(--pad);
+  -webkit-app-region: drag;
 }
-
-.tab .favicon {
-  width: var(--f13);
-  height: var(--f13);
-  flex: none;
-  border-radius: var(--f3);
-  background: var(--bg-hover);
-}
-.tab .favicon.loading {
-  background: none;
-  border: 2px solid var(--fg-dim);
-  border-top-color: transparent;
-  border-radius: 50%;
-  animation: spin 0.7s linear infinite;
-}
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-.tab .title {
-  flex: 1;
-  min-width: 0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  line-height: 1.4; /* beri ruang untuk ekor huruf g, y, p, q, j */
-}
-
-.tab .close {
-  flex: none;
-  width: 16px;
-  height: 16px;
-  display: grid;
-  place-items: center;
-  border: 0;
-  border-radius: var(--f5);
-  background: none;
-  color: inherit;
-  opacity: 0;
-}
-.tab .audio {
-  flex: none;
-  width: 16px;
-  height: 16px;
-  display: grid;
-  place-items: center;
-  border: 0;
-  border-radius: var(--f5);
-  background: none;
-  color: inherit;
-  opacity: 0.8;
-}
-.tab .audio:empty {
-  display: none;
-}
-.tab .audio:hover {
-  background: #3a3a45;
-  opacity: 1;
-}
-.tab .audio svg {
-  width: 13px;
-  height: 13px;
-}
-.tab:hover .close,
-.tab.active .close {
-  opacity: 0.8;
-}
-.tab .close:hover {
-  background: #3a3a45;
-  opacity: 1;
-}
-.tab .close svg {
-  width: var(--f8);
-  height: var(--f8);
-}
-
-/* Tab yang ditidurkan (RAM dibebaskan): redup + ikon abu-abu */
-.tab.suspended .title {
-  opacity: 0.55;
-}
-.tab.suspended .favicon {
-  filter: grayscale(1);
-  opacity: 0.7;
-}
-
-/* Tab sempit: buang yang tidak muat, mulai dari tombol tutup lalu judul */
-@container (max-width: 144px) {
-  .tab:not(.active) .close {
-    display: none;
-  }
-}
-@container (max-width: 89px) {
-  .tab.active .title {
-    display: none;
-  }
-  .tab.active .body {
-    justify-content: space-between;
-  }
-}
-@container (max-width: 55px) {
-  .tab:not(.active) .title {
-    display: none;
-  }
-  .tab:not(.active) .body {
-    padding: 0;
-    justify-content: center;
-  }
-}
-
-/* Spinner loading tidak ikut dimatikan: itu indikator fungsional, bukan hiasan */
-@media (prefers-reduced-motion: reduce) {
-  .tab {
-    animation: none;
-  }
-  #toolbar,
-  #address {
-    transition: none;
-  }
-}
-
-/* ---------- Toolbar ---------- */
-#toolbar {
-  position: relative;
-  height: var(--bar-h);
-  display: grid;
-  grid-template-columns: 1fr var(--addr-w) 1fr; /* address bar selalu di tengah */
-  align-items: center;
-  gap: var(--f8);
-  padding: 0 var(--f13);
-  background: var(--bg-tab);
-  transition: grid-template-columns 144ms ease-out;
-}
-/* Mengetik alamat: address bar melebar 377 -> 610 (1 : 1,618) */
-#toolbar:has(#address:focus) {
-  --addr-w: min(610px, calc(100% - 288px));
-}
-
 .side {
   display: flex;
   align-items: center;
   gap: var(--f3);
+  min-width: 0;
 }
 .side.right {
   justify-content: flex-end;
 }
+#brand {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin: 0 var(--f5) 0 var(--f5);
+  pointer-events: none;
+}
 
+#addrbox {
+  position: relative;
+  min-width: 0;
+  -webkit-app-region: no-drag;
+}
 #address {
   width: 100%;
   height: var(--ctl);
-  padding: 0 var(--f13);
+  padding: 0 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   border: 1px solid transparent;
   border-radius: var(--ctl);
   background: var(--bg-input);
-  color: var(--fg);
+  color: var(--fg-dim);
   font: inherit;
-  text-align: center;
-  outline: none;
-  user-select: text;
+  cursor: text;
   transition: background 120ms;
-}
-#address::placeholder {
-  color: #7a7a88;
-  text-align: center;
 }
 #address:hover {
   background: var(--bg-input-hover);
+  color: var(--fg);
 }
-#address:focus {
-  border-color: var(--accent);
-  background: var(--bg-input-focus);
-  text-align: left;
+#address:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
 }
-#address:focus::placeholder {
-  text-align: left;
+#addr-text {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.4;
+}
+#address.empty #addr-text {
+  color: #7a7a88;
+}
+#site {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 1;
+  border-radius: var(--ctl);
 }
 
-/* ---------- Tombol ikon: ikon 21 di dalam kotak 34 (0,618) ---------- */
+/* ---------- Tombol ikon ---------- */
 .icon-btn {
   -webkit-app-region: no-drag;
   height: var(--ctl);
@@ -341,7 +157,7 @@ body {
   gap: var(--f3);
   padding: 0 var(--f3);
   border: 0;
-  border-radius: var(--f5);
+  border-radius: 8px;
   background: none;
   color: var(--fg-dim);
 }
@@ -369,18 +185,9 @@ body {
   fill: currentColor;
   stroke: none;
 }
-#new-tab {
-  margin: 0 0 2px var(--f5);
-  height: var(--f21);
-  min-width: var(--f21);
-  padding: 0;
+#sidebar-toggle.on {
+  color: var(--accent);
 }
-#new-tab svg {
-  width: var(--f13);
-  height: var(--f13);
-  stroke-width: 1.6;
-}
-
 #star.on {
   color: var(--accent);
 }
@@ -390,7 +197,6 @@ body {
 #adblock.on {
   color: var(--accent);
 }
-/* Unduhan: ikon jadi aksen + bar progres tipis di bawah ikon selama mengunduh */
 #downloads {
   position: relative;
 }
@@ -433,24 +239,416 @@ body {
   display: none;
 }
 
-/* ---------- Tombol info & izin situs (di dalam address bar, kiri) ---------- */
-#addrbox {
-  position: relative;
-  min-width: 0;
+/* ---------- Sidebar (auto-hide) ---------- */
+#sidebar {
+  position: fixed;
+  top: var(--top);
+  bottom: var(--pad);
+  left: var(--pad);
+  width: var(--side-w);
+  display: flex;
+  flex-direction: column;
+  gap: var(--f5);
+  isolation: isolate;
+  opacity: 0;
+  transform: translateX(-16px);
+  pointer-events: none;
+  transition:
+    transform 170ms cubic-bezier(0.215, 0.61, 0.355, 1),
+    opacity 150ms ease-out,
+    width 170ms cubic-bezier(0.215, 0.61, 0.355, 1);
 }
-#site {
+body.sb-open #sidebar {
+  opacity: 1;
+  transform: none;
+  pointer-events: auto;
+}
+/* Gradasi tipis transparan di belakang isi sidebar; memudar ke latar ke semua arah, tanpa tepi tajam */
+#sidebar::before {
+  content: "";
+  position: absolute;
+  inset: 0 -6px;
+  z-index: -1;
+  pointer-events: none;
+  background: radial-gradient(
+    130% 55% at 0% 0%,
+    rgb(124 140 255 / 0.08),
+    rgb(124 140 255 / 0.03) 45%,
+    transparent 75%
+  );
+  -webkit-mask-image: linear-gradient(to right, #000 55%, transparent);
+  mask-image: linear-gradient(to right, #000 55%, transparent);
+}
+#hot {
+  position: fixed;
+  left: 0;
+  top: var(--top);
+  bottom: 0;
+  width: var(--pad);
+  z-index: 5;
+}
+body.sb-open #hot {
+  pointer-events: none;
+}
+
+#new-tab {
+  flex: none;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px 0 9px;
+  border: 0;
+  border-radius: 9px;
+  background: none;
+  color: var(--fg-dim);
+  font: inherit;
+  text-align: left;
+}
+body:not(.mode-top) #new-tab {
+  margin-top: calc(
+    var(--f3) - var(--f5)
+  ); /* jarak ke tab terakhir sama dengan jarak antar tab */
+}
+#new-tab:hover {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+#new-tab span {
+  white-space: nowrap;
+  overflow: hidden;
+}
+#new-tab svg {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+}
+
+#tabs {
+  flex: 0 1 auto; /* setinggi isinya: tombol New Tab menempel di bawah tab terakhir; menggulir bila ruang habis */
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--f3);
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+#tabs::-webkit-scrollbar {
+  width: 6px;
+}
+#tabs::-webkit-scrollbar-thumb {
+  background: #30303c;
+  border-radius: 3px;
+}
+
+.tab {
+  position: relative;
+  flex: none;
+  height: 34px;
+  border-radius: 9px;
+  color: var(--fg-dim);
+  cursor: default;
+  animation: tab-in 120ms ease-out;
+}
+.tab.dragging {
+  z-index: 2;
+  animation: none;
+  background: var(--bg-hover);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 0.4);
+}
+.tab.active {
+  background: var(--bg-sel);
+  color: var(--fg);
+}
+.tab:not(.active):hover {
+  background: var(--bg-hover);
+}
+@keyframes tab-in {
+  from {
+    opacity: 0;
+  }
+}
+.tab .body {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 var(--f3) 0 8px;
+}
+.tab .favicon {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  border-radius: var(--f3);
+  background: var(--bg-hover);
+}
+.tab .favicon.loading {
+  background: none;
+  border: 2px solid var(--fg-dim);
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.tab .title {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.4;
+}
+.tab .close,
+.tab .audio {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: inherit;
+}
+.tab .close {
+  opacity: 0;
+}
+.tab .audio {
+  opacity: 0.8;
+}
+.tab .audio:empty {
+  display: none;
+}
+.tab .audio svg {
+  width: 13px;
+  height: 13px;
+}
+.tab:hover .close,
+.tab.active .close {
+  opacity: 0.8;
+}
+.tab .close:hover,
+.tab .audio:hover {
+  background: #3a3a45;
+  opacity: 1;
+}
+.tab .close svg {
+  width: 8px;
+  height: 8px;
+}
+/* Tab yang sedang dalam split view: garis aksen di kiri */
+.tab.split::before {
+  content: "";
   position: absolute;
   left: 0;
-  top: 0;
-  z-index: 1;
-  border-radius: var(--ctl);
+  top: 8px;
+  bottom: 8px;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--accent);
 }
-#address {
-  padding: 0 var(--f34);
-} /* sisakan ruang tombol agar teks tengah tidak menabraknya */
-#address:focus {
-  padding: 0 var(--f13);
+.tab.suspended .title {
+  opacity: 0.55;
 }
-#toolbar:has(#address:focus) #site {
+.tab.suspended .favicon {
+  filter: grayscale(1);
+  opacity: 0.7;
+}
+
+/* ---------- Resize sidebar + mode icon-only ---------- */
+#sb-resize {
+  position: fixed;
+  top: var(--top);
+  bottom: var(--pad);
+  left: calc(var(--pad) + var(--side-w) - 2px);
+  width: 10px;
+  z-index: 6;
   display: none;
+  cursor: col-resize;
+  touch-action: none;
+  -webkit-app-region: no-drag;
+  transition: left 170ms cubic-bezier(0.215, 0.61, 0.355, 1);
+}
+body.sb-open #sb-resize {
+  display: block;
+}
+body.mode-top #sb-resize {
+  display: none;
+}
+#sb-resize::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 5px;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--accent);
+  opacity: 0;
+  transition: opacity 120ms;
+}
+#sb-resize:hover::after,
+body.sb-resizing #sb-resize::after {
+  opacity: 0.7;
+}
+body.sb-resizing,
+body.sb-resizing * {
+  cursor: col-resize !important;
+  user-select: none;
+}
+body.sb-resizing #sidebar,
+body.sb-resizing #stage,
+body.sb-resizing #sb-resize {
+  transition: none;
+}
+
+/* Sidebar menyempit: hanya ikon. Tombol tutup & indikator audio menjadi lencana kecil di sisi ikon. */
+body.sb-mini:not(.mode-top) #new-tab {
+  justify-content: center;
+  padding: 0;
+}
+body.sb-mini:not(.mode-top) #new-tab span,
+body.sb-mini:not(.mode-top) .tab .title {
+  display: none;
+}
+body.sb-mini:not(.mode-top) .tab .body {
+  justify-content: center;
+  gap: 0;
+  padding: 0;
+}
+body.sb-mini:not(.mode-top) #tabs::-webkit-scrollbar {
+  width: 0;
+}
+body.sb-mini:not(.mode-top) .tab .close,
+body.sb-mini:not(.mode-top) .tab .audio {
+  position: absolute;
+  right: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 4px;
+  background: var(--bg);
+}
+body.sb-mini:not(.mode-top) .tab .close {
+  top: 2px;
+}
+body.sb-mini:not(.mode-top) .tab .audio {
+  bottom: 2px;
+}
+body.sb-mini:not(.mode-top) .tab .close svg {
+  width: 7px;
+  height: 7px;
+}
+body.sb-mini:not(.mode-top) .tab .audio svg {
+  width: 10px;
+  height: 10px;
+}
+body.sb-mini:not(.mode-top) .tab.active:not(:hover) .close {
+  opacity: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tab,
+  #sidebar,
+  #sb-resize,
+  #stage {
+    animation: none;
+    transition: none;
+  }
+}
+
+/* ---------- Pembungkus tab: dipindah antara sidebar dan baris tab atas ---------- */
+#tabzone {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--f5);
+}
+#new-tab,
+.tab {
+  -webkit-app-region: no-drag;
+}
+
+/* ---------- Mode "top": baris tab di atas, tanpa sidebar ---------- */
+body.mode-top {
+  --tabrow: 36px;
+  --barh: 38px;
+  --bar-pr: var(--pad);
+  --left: var(--pad);
+}
+#tabbar {
+  display: none;
+}
+body.mode-top #tabbar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: var(--tabrow);
+  display: flex;
+  align-items: center;
+  padding: 0 142px 0 var(--pad);
+  -webkit-app-region: drag;
+}
+body.mode-top #sidebar,
+body.mode-top #hot,
+body.mode-top #sidebar-toggle {
+  display: none;
+}
+body.mode-top #tabzone {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 100%;
+  flex-direction: row;
+  align-items: center;
+  gap: var(--f3);
+}
+body.mode-top #tabs {
+  flex: 0 1 calc(var(--n, 1) * 224px);
+  min-width: 0;
+  height: 100%;
+  flex-direction: row;
+  align-items: center;
+  overflow: hidden;
+  padding: 0;
+}
+body.mode-top .tab {
+  container-type: inline-size;
+  flex: 1 1 224px;
+  min-width: 44px;
+  max-width: 224px;
+  height: 30px;
+}
+body.mode-top #new-tab {
+  order: 2;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  justify-content: center;
+}
+body.mode-top #new-tab span {
+  display: none;
+}
+@container (max-width: 110px) {
+  .tab:not(.active) .close {
+    display: none;
+  }
+}
+@container (max-width: 70px) {
+  .tab .title {
+    display: none;
+  }
+  .tab:not(.active) .body {
+    padding: 0;
+    justify-content: center;
+  }
 }

@@ -54,3 +54,20 @@ input:focus, select:focus, button:focus-visible { outline: 2px solid #5b8def; ou
 .card .tag { margin-left: 8px; padding: 1px 8px; font-size: 11px; font-weight: 500; border-radius: 99px; background: #26262e; color: #a8a8b3; }
 .card .desc { color: #8c8c98; font-size: 13px; margin-top: 2px; }
 .card .desc + .desc { margin-top: 6px; }
+
+/* Dialog konfirmasi */
+.modal-back { position: fixed; inset: 0; z-index: 10; display: grid; place-items: center; padding: 24px;
+  background: rgb(8 8 12 / .65); backdrop-filter: blur(3px); animation: fade 120ms ease-out; }
+.modal-back.out { opacity: 0; transition: opacity 120ms; }
+.modal { width: 100%; max-width: 420px; padding: 24px; background: #1c1c22; border: 1px solid #34343e;
+  border-radius: 16px; box-shadow: 0 16px 48px rgb(0 0 0 / .55); animation: pop 160ms ease-out; }
+.modal-ico { width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center;
+  background: rgb(224 164 88 / .15); color: #e0a458; font-weight: 700; font-size: 18px; margin-bottom: 14px; }
+.modal-title { font-size: 16px; font-weight: 600; margin-bottom: 6px; }
+.modal-text { color: #a8a8b3; font-size: 13px; line-height: 1.55; }
+.modal-btns { display: flex; justify-content: flex-end; gap: 8px; margin-top: 22px; }
+button.danger-solid { background: #d14b45; border-color: #d14b45; color: #fff; font-weight: 600; }
+button.danger-solid:hover:not(:disabled) { background: #e05a54; }
+@keyframes fade { from { opacity: 0; } }
+@keyframes pop { from { opacity: 0; transform: translateY(8px) scale(.97); } }
+@media (prefers-reduced-motion: reduce) { .modal-back, .modal { animation: none; } }

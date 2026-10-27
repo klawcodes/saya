@@ -10,6 +10,7 @@ const {
   sendUI,
   shared,
 } = require("./main-core");
+const $dialog = require("./main-dialog");
 const $downloads = require("./main-downloads");
 const $tabs = require("./main-tabs");
 
@@ -201,32 +202,42 @@ function permKeys(permission, mediaTypes) {
   return (t.length ? t : ["audio", "video"]).map((x) => "media:" + x);
 }
 
-function askPermission(origin, keys) {
+function askPermission(origin, keys, wc) {
   const id = origin + "|" + keys.join(",");
   if (pendingAsk.has(id)) return pendingAsk.get(id); // permintaan sama yang sedang ditanyakan
   const task = (async () => {
-    const opts = {
-      type: "question",
-      buttons: ["Allow", "Block"],
-      defaultId: 1,
-      cancelId: 1,
-      noLink: true,
-      title: "Site permission",
-      message: `${new URL(origin).host} wants to access ${keys.map((k) => PERM_LABEL[k] || k).join(" and ")}`,
-      detail:
-        "Your choice is remembered for this site. You can reset it from the menu (⋯ > Reset site permissions).",
-    };
-    const { response } =
-      shared.win && !shared.win.isDestroyed()
-        ? await dialog.showMessageBox(shared.win, opts)
-        : await dialog.showMessageBox(opts);
-    const allow = response === 0;
+    // Dialog kustom (main-dialog.js). Allow / Block diingat untuk situs ini; menutup dialog tanpa memilih
+    // (Esc, tab ditutup) hanya menolak kali ini saja dan tidak disimpan.
+    const res = await $dialog.permission({ origin, keys, wc });
+    if (res.button !== "allow" && res.button !== "block") return false;
+    const allow = res.button === "allow";
     for (const k of keys) shared.stores.permissions.set(origin, k, allow);
     return allow;
   })().finally(() => pendingAsk.delete(id));
   pendingAsk.set(id, task);
   return task;
 }
+
+// Status izin untuk halaman: pagepreload.js memakainya agar navigator.permissions.query() jujur
+// (granted / denied / prompt) sesuai pilihan yang tersimpan, bukan "denied" untuk semua yang belum diputuskan.
+const PERMSTATE_KEYS = {
+  geolocation: "geolocation",
+  camera: "media:video",
+  microphone: "media:audio",
+  "clipboard-read": "clipboard-read",
+};
+ipcMain.on("saya:permstate", (e, name) => {
+  let state = "prompt";
+  try {
+    const origin = originOf(e.senderFrame?.url);
+    const key = PERMSTATE_KEYS[String(name)];
+    if (origin && key) {
+      const v = shared.stores.permissions.get(origin, key);
+      state = v === true ? "granted" : v === false ? "denied" : "prompt";
+    }
+  } catch {}
+  e.returnValue = state;
+});
 
 function setupPermissions(ses) {
   ses.setPermissionRequestHandler(async (wc, permission, callback, details) => {
@@ -250,6 +261,7 @@ function setupPermissions(ses) {
         await askPermission(
           origin,
           keys.filter((_k, i) => known[i] === undefined),
+          wc,
         ),
       );
     } catch {
@@ -664,6 +676,20 @@ function isAllowlisted(details) {
   return false;
 }
 
+// Respons PDF (Content-Type: application/pdf). Viewer PDF bawaan Chromium tidak boleh disentuh ad blocker
+// (header CSP yang dimodifikasi bisa membuat plugin PDF tidak tampil) dan URL-nya dicatat supaya
+// tema gelap otomatis tidak diterapkan pada halaman PDF (lihat applyTheme di main-tabs.js).
+function isPdfResponse(d) {
+  try {
+    const h = d.responseHeaders || {};
+    for (const k of Object.keys(h)) {
+      if (k.toLowerCase() !== "content-type") continue;
+      return /^\s*application\/pdf\b/i.test(String([].concat(h[k])[0]));
+    }
+  } catch {}
+  return false;
+}
+
 function enableBlocking() {
   const ses = session.defaultSession;
   shared.blocker.enableBlockingInSession(ses);
@@ -700,6 +726,13 @@ function enableBlocking() {
       cb(r);
     };
     try {
+      if (isPdfResponse(details)) {
+        if (details.resourceType === "mainFrame") {
+          shared.pdfDocs.add(details.url);
+          if (shared.pdfDocs.size > 200) shared.pdfDocs.clear();
+        }
+        return once({});
+      }
       if (isAllowlisted(details)) return once({});
       shared.blocker.onHeadersReceived(details, once);
     } catch {

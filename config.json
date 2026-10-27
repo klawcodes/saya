@@ -24,6 +24,10 @@
     "enabled": true,
     "remote": true
   },
+    "identity": {
+    "chromeShim": "google",
+    "clientHints": false
+  },
   "hardwareAcceleration": true,
   "restoreTabs": true,
   "adblock": {

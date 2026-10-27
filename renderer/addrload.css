@@ -1,0 +1,44 @@
+/* Indikator loading kecil di ujung kanan address bar, sebaris dengan tombol izin situs (#site, kiri).
+   Gayanya disalin dari spinner favicon tab (.tab .favicon.loading di style.css): cincin 2px, busur
+   transparan di atas, berputar 0.7s linear. #addrbox bukan flex (position: relative), jadi indikator
+   diposisikan absolut di kanan, kotaknya sama dengan #site (var(--ctl)) supaya sejajar vertikal.
+   Tampil hanya jika: tab aktif sedang memuat (#addrbox.loading), tab ada di sidebar (bukan body.mode-top),
+   dan sidebar tidak di-pin (bukan body.sb-open). Mengikuti class body yang sudah ada, tanpa state baru. */
+
+/* GANTI WARNA DI SINI SAJA */
+#addr-load {
+  --load-color: var(--fg-dim); /* sama dengan spinner di tab; mis. #ffffff untuk lebih terang */
+}
+
+#addr-load {
+  display: none;
+  position: absolute;
+  right: 0;
+  top: 0;
+  z-index: 1;
+  width: var(--ctl);
+  height: var(--ctl);
+  pointer-events: none;
+  place-items: center;
+}
+#addr-load::before {
+  content: "";
+  width: 16px;
+  height: 16px;
+  box-sizing: border-box;
+  border: 2px solid var(--load-color);
+  border-top-color: transparent;
+  border-radius: 50%;
+}
+body:not(.mode-top):not(.sb-open) #addrbox.loading #addr-load {
+  display: grid;
+}
+/* Sengaja tanpa override prefers-reduced-motion, sama seperti spinner tab (yang juga tetap berputar) */
+body:not(.mode-top):not(.sb-open) #addrbox.loading #addr-load::before {
+  animation: addr-load-spin 0.7s linear infinite;
+}
+@keyframes addr-load-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

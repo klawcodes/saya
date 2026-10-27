@@ -243,7 +243,11 @@ class SessionState extends Persisted {
         ? d.tabs
             .filter((t) => t && isWeb(t.u))
             .slice(0, 50)
-            .map((t) => ({ u: t.u, t: clip(t.t, 300) }))
+            .map((t) => ({
+              u: t.u,
+              t: clip(t.t, 300),
+              f: isWeb(t.f) && t.f.length <= 2048 ? t.f : "", // favicon terakhir, agar ikon tab tidur langsung tampil
+            }))
         : [];
     this.active =
       ok && Number.isInteger(d.active) && d.active >= 0 ? d.active : 0;
@@ -267,6 +271,10 @@ class SessionState extends Persisted {
     this.maximized = !!ok && d.maximized === true;
     this.engine =
       ok && typeof d.engine === "string" ? d.engine.slice(0, 40) : ""; // id mesin pencari terakhir
+    this.sbw =
+      ok && Number.isFinite(d.sbw) && d.sbw >= 20 && d.sbw <= 800
+        ? Math.round(d.sbw)
+        : 0; // lebar sidebar (0 = default); dibatasi lagi di main-core.js
   }
   snapshot() {
     return {
@@ -275,7 +283,14 @@ class SessionState extends Persisted {
       bounds: this.bounds,
       maximized: this.maximized,
       engine: this.engine,
+      sbw: this.sbw,
     };
+  }
+  setSbw(w) {
+    w = Math.round(w) || 0;
+    if (this.sbw === w) return;
+    this.sbw = w;
+    this.touch();
   }
   setEngine(id) {
     if (this.engine === id) return;
